@@ -1,0 +1,8 @@
+id: signal_registry
+family: protocol_convention
+repo: signal_registry
+language: python
+framework: pytest
+prompt: |
+  The function broadcast in registry.py is failing its tests with a ConnectionError.
+  Fix the implementation so it successfully returns the signals. Do not modify tests.

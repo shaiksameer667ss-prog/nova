@@ -46,13 +46,13 @@ def _dispatch(action: dict, settings: Settings) -> str:
     raise ValueError(f"unknown action: {kind}")
 
 
-def run_task(task: str, settings: Settings, arm: str = "A", seed: int = 0) -> dict:
+def run_task(task: str, settings: Settings, arm: str = "A", seed: int = 0, benchmark_task_id: str | None = None) -> dict:
     settings.workspace.mkdir(parents=True, exist_ok=True)
     client = ModelClient(settings)
     conn = connect(settings.db)
 
     run_id = str(uuid4())
-    task_id = f"adhoc_{run_id[:8]}"
+    task_id = benchmark_task_id if benchmark_task_id else f"adhoc_{run_id[:8]}"
     started = datetime.now(timezone.utc)
 
     messages = [
@@ -77,7 +77,11 @@ def run_task(task: str, settings: Settings, arm: str = "A", seed: int = 0) -> di
             transcript.append({"step": step, "error": "bad json", "raw": raw[:200]})
             continue
 
-        transcript.append({"step": step, "action": action})
+        transcript.append({
+            "step": step,
+            "assistant_output": raw,
+            "action": action,
+        })
 
         if action.get("action") == "done":
             agent_success = True
@@ -88,6 +92,8 @@ def run_task(task: str, settings: Settings, arm: str = "A", seed: int = 0) -> di
             observation = _dispatch(action, settings)
         except Exception as e:
             observation = f"ERROR: {type(e).__name__}: {e}"
+
+        transcript[-1]["observation"] = observation
 
         messages.append({"role": "assistant", "content": raw})
         messages.append({"role": "user", "content": f"Observation:\n{observation}"})

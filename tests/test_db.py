@@ -53,7 +53,16 @@ def test_insert_and_read_skill(tmp_path):
 
 def test_settings_db_path_used_by_connect():
     s = get_settings()
-    # connect should not raise even if data/ does not exist yet
     conn = connect(s.db)
     assert conn is not None
+    conn.close()
+
+
+def test_runs_has_verified_success_column(tmp_path):
+    conn = connect(tmp_path / "test.sqlite3")
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+    }
+    assert "verified_success" in columns
     conn.close()

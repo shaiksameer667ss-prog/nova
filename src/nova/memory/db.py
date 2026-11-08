@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS runs (
     seed         INTEGER NOT NULL,
     model        TEXT NOT NULL,
     success      INTEGER NOT NULL,
+    verified_success INTEGER,
     cost_usd     REAL NOT NULL DEFAULT 0.0,
     wall_seconds REAL NOT NULL DEFAULT 0.0,
     git_sha      TEXT,
@@ -55,4 +56,16 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    
+    # Migrate existing databases safely.
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+    }
+    if "verified_success" not in columns:
+        conn.execute(
+            "ALTER TABLE runs ADD COLUMN verified_success INTEGER"
+        )
+        conn.commit()
+        
     return conn

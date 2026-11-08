@@ -1,0 +1,11 @@
+id: inventory_batch
+family: state_management
+repo: inventory_batch
+language: python
+framework: pytest
+
+prompt: |
+  The InventoryLedger class in ledger.py manages stock levels. Adjustments
+  are staged and then applied via commit_batch(). The contract requires
+  that commit_batch() applies all staged adjustments exactly once.
+  It currently fails its tests. Fix the implementation. Do not modify tests.
