@@ -1,0 +1,8 @@
+id: hidden_auth
+family: protocol_convention
+repo: hidden_auth
+language: python
+framework: pytest
+prompt: |
+  The function store_items in vault.py is failing its tests with a PermissionError.
+  Fix the implementation so it successfully returns the items. Do not modify tests.

@@ -234,3 +234,156 @@ The current results provide a reproducible starting point for investigating that
 - Token audit: 15/15 runs reconciled
 - Post-fix dataset: `eval/results/auth_system_replication_20261108.json`
 - Earlier Protocol-X dataset: `eval/results/protocol_x_signal_registry_postfix_20261108.json`
+## HiddenAuth: Five-Seed Matched Procedural Transfer Experiment
+
+- **Date:** 2026-11-08
+- **Model:** Local Qwen3.5-4B Q4 through Ollama
+- **Task:** `hidden_auth`
+- **Arms:** A (no memory), D (learned procedural skill)
+**Seeds:** 0–4
+
+### Experimental design
+
+HiddenAuth removes the explanatory protocol documentation from a stateful
+Vault implementation. The agent receives a failing `store_items` function
+and must diagnose the PermissionError and repair the implementation.
+
+The underlying state-transition pattern is related to the SignalRegistry
+source task used to acquire the procedural skill. This is a related-task
+transfer experiment, not an independent task-family generalization test.
+
+Arm A receives no memory. Arm D receives the exact previously extracted
+skill:
+
+- Source run: `5a8ac88a-c895-4c7a-acba-c0d255c5f053`
+- Skill ID: `4fa3d101-7609-4fd0-9381-042983f966e3`
+
+Each execution uses a reset workspace. Hidden tests are copied into a
+separate temporary verification directory and are not exposed to the agent.
+
+### Verifier correction and excluded attempts
+
+The first Arm A and Arm D seed-0 executions were made while the
+`hidden_tests` directory was empty. Pytest reported `no tests ran`.
+Those executions are excluded from performance analysis and must not be
+treated as verified failures.
+
+The missing `test_vault.py` file was subsequently created. The verifier was
+tested against the repaired workspace and returned:
+
+- `VERIFIED: True`
+- `1 passed`
+
+Both arms were then rerun from the original task repository with the
+functioning verifier. Those reruns, together with seeds 1–4, form the
+valid five-seed matched dataset.
+
+### Five-seed results
+
+| Seed | A steps | A tokens | D steps | D tokens | D minus A tokens |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 4 | 2,665 | 3 | 2,943 | +278 |
+| 1 | 4 | 2,598 | 3 | 2,689 | +91 |
+| 2 | 6 | 4,991 | 3 | 2,781 | -2,210 |
+| 3 | 4 | 2,685 | 3 | 2,832 | +147 |
+| 4 | 4 | 2,538 | 3 | 2,904 | +366 |
+| **Mean** | **4.4** | **3,095.4** | **3.0** | **2,829.8** | **-265.6** |
+| **Median tokens** | | **2,665** | | **2,832** | **+147 median paired difference** |
+
+All five Arm A executions and all five Arm D executions passed independent
+verification (10/10 total).
+
+Descriptive findings:
+
+- Arm D used 1.4 fewer agent steps on average.
+- Arm D used 265.6 fewer deployment tokens on average, an 8.58% reduction
+  relative to Arm A.
+- However, Arm D consumed more tokens in four of the five matched seeds.
+- The apparent mean token advantage is driven by seed 2, where Arm A used
+  4,991 tokens and Arm D used 2,781.
+- The median paired token difference was +147 tokens, meaning the typical
+  matched seed used more tokens with memory.
+
+The mean token reduction is therefore sensitive to run variability and
+does not establish a consistent deployment-token advantage.
+
+### Accounting and provenance audit
+
+All ten selected runs passed the read-only database audit:
+
+- All ten runs have `verified_success = 1`.
+- Every model call has complete prompt, completion and total-token usage.
+- Each model-call total equals prompt tokens plus completion tokens.
+- The sum of model-call token usage reconciles exactly with its run-level
+  token totals.
+- All five D runs injected the exact expected skill ID.
+- The D memory source run and skill provenance match the recorded source.
+- All five A runs report no memory injection.
+
+The complete run records, full run IDs, individual model-call records,
+memory provenance and audit results are saved in:
+
+`eval/results/hidden_auth_matched_5seeds_20261108.json`
+
+### Deployment economics versus lifecycle economics
+
+The five target deployments cost:
+
+- Arm A: 15,477 total tokens, or 3,095.4 per verified target completion.
+- Arm D: 14,149 total deployment tokens, or 2,829.8 per verified target
+  completion.
+
+The skill has additional creation costs:
+
+| Lifecycle component | Measured tokens |
+|---|---:|
+| Source-task acquisition | 2,490 |
+| Successful skill extraction | 2,614 |
+| **Known skill creation cost** | **5,104** |
+
+One earlier skill-extraction attempt ended in a client unpacking error.
+Its token usage is unknown and is not counted as zero.
+
+Including the known source acquisition and successful extraction costs,
+the five-deployment Arm D workload consumed:
+
+`14,149 + 2,490 + 2,614 = 19,253 tokens`
+
+That equals 3,850.6 known lifecycle tokens per verified target completion
+over five deployments, before adding the unknown failed-attempt cost.
+
+For comparison, the no-memory Arm A target workload averaged 3,095.4
+tokens per verified target completion.
+
+A descriptive break-even extrapolation can be calculated from the observed
+mean deployment difference:
+
+`5,104 / (3,095.4 - 2,829.8) = approximately 19.2 deployments`
+
+This suggests approximately 20 deployments to recover the known creation
+cost if the observed mean deployment-token saving persists. This is only
+a projection from five seeds, not an experimentally demonstrated
+break-even point. The unknown failed extraction cost would increase it.
+
+### Interpretation and limitations
+
+The current experiment supports the following limited conclusion:
+
+The learned procedural skill was associated with fewer agent steps in
+all five matched seeds and achieved the same 5/5 verified success rate
+as the no-memory baseline. Its deployment-token mean was lower, but four
+of five paired runs consumed more tokens with memory. The mean advantage
+was driven by one unusually expensive baseline execution.
+
+After including the known acquisition and extraction costs, the learned
+skill had higher lifecycle token cost over the five observed deployments.
+
+This experiment does not establish generalization across independent
+task families. HiddenAuth is related to the source Protocol-X task.
+The sample comprises five seeds per arm on one target task. The results
+are descriptive, not conclusive evidence of a general memory-efficiency
+advantage.
+
+The appropriate next step is replication across independent task
+families and longer reuse horizons, while retaining complete lifecycle
+accounting and independent verification.

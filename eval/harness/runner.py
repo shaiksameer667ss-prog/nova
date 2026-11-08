@@ -24,7 +24,7 @@ Here is a previous successful code change for a similar problem:
          return self._committed
 """
 
-# STRICT IDs FOR THE NEW BUDGET EXPERIMENT
+# STRICT IDs FOR THE CURRENT EXPERIMENT
 ACQUISITION_RUN_ID = "5a8ac88a-c895-4c7a-acba-c0d255c5f053"
 EXTRACTED_SKILL_ID = "4fa3d101-7609-4fd0-9381-042983f966e3"
 
@@ -97,6 +97,8 @@ def _build_prompt(task: dict, arm: str, conn) -> tuple[str, dict]:
 
 
 def _run_hidden_tests(workspace: Path, hidden_dir: Path) -> tuple[bool, str]:
+    """Copy workspace + hidden tests into a fresh temp dir, run pytest there.
+    Agent never sees hidden tests. This is the independent verifier."""
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         for src in workspace.rglob("*"):
