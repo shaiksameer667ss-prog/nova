@@ -24,30 +24,46 @@ Here is a previous successful code change for a similar problem:
          return self._committed
 """
 
-# Strict IDs
-ACQUISITION_RUN_ID = "38d8accd-392a-4483-9180-71abae3d76b0"
-EXTRACTED_SKILL_ID = "41e7d45f-2e84-4be3-99ed-34f21338c58b"
+# STRICT IDs FOR THE NEW BUDGET EXPERIMENT
+ACQUISITION_RUN_ID = "5a8ac88a-c895-4c7a-acba-c0d255c5f053"
+EXTRACTED_SKILL_ID = "4fa3d101-7609-4fd0-9381-042983f966e3"
+
 
 def _load_task(task_dir: Path) -> dict:
     with open(task_dir / "task.yaml", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
+
 def _build_prompt(task: dict, arm: str, conn) -> tuple[str, dict]:
     prompt = task["prompt"]
-    memory_info = {"injected": 0, "type": None, "item_id": None, "source_run_id": None, "sha256": None}
+    memory_info = {
+        "injected": 0, 
+        "type": None, 
+        "item_id": None, 
+        "source_run_id": None, 
+        "sha256": None
+    }
     
     gold_label = task.get("gold_skill_arm_label", "GOLD")
     
     if arm == gold_label and task.get("gold_skill"):
         text = task['gold_skill']
         prompt = f"{prompt}\n\nA previously learned procedure you may consider:\n{text}"
-        memory_info.update({"injected": 1, "type": "gold", "sha256": hashlib.sha256(text.encode()).hexdigest()})
+        memory_info.update({
+            "injected": 1, 
+            "type": "gold", 
+            "sha256": hashlib.sha256(text.encode()).hexdigest()
+        })
         
     elif arm == "B": # Patch Memory
         prompt = f"{prompt}\n\n{PATCH_MEMORY}"
-        memory_info.update({"injected": 1, "type": "patch", "sha256": hashlib.sha256(PATCH_MEMORY.encode()).hexdigest()})
+        memory_info.update({
+            "injected": 1, 
+            "type": "patch", 
+            "sha256": hashlib.sha256(PATCH_MEMORY.encode()).hexdigest()
+        })
         
-    elif arm == "C": # Raw Experience (Strict Lookup + Fail-Fast)
+    elif arm == "C": # Raw Experience (Strict Lookup)
         episode = conn.execute("SELECT id, actions FROM episodes WHERE run_id = ?", (ACQUISITION_RUN_ID,)).fetchone()
         if not episode:
             raise ValueError(f"CRITICAL: Could not find raw experience for run {ACQUISITION_RUN_ID}")
@@ -55,11 +71,14 @@ def _build_prompt(task: dict, arm: str, conn) -> tuple[str, dict]:
         text = f"Here is a raw JSON execution trace of a previous similar task:\n{episode['actions']}"
         prompt = f"{prompt}\n\n{text}"
         memory_info.update({
-            "injected": 1, "type": "raw_experience", "item_id": episode["id"], 
-            "source_run_id": ACQUISITION_RUN_ID, "sha256": hashlib.sha256(text.encode()).hexdigest()
+            "injected": 1, 
+            "type": "raw_experience", 
+            "item_id": episode["id"], 
+            "source_run_id": ACQUISITION_RUN_ID, 
+            "sha256": hashlib.sha256(text.encode()).hexdigest()
         })
             
-    elif arm == "D": # Learned Skill (Strict Lookup + Fail-Fast)
+    elif arm == "D": # Learned Skill (Strict Lookup)
         skill = conn.execute("SELECT id, source_run_id, trigger_conditions, procedure FROM skills WHERE id = ?", (EXTRACTED_SKILL_ID,)).fetchone()
         if not skill:
             raise ValueError(f"CRITICAL: Could not find learned skill {EXTRACTED_SKILL_ID}")
@@ -67,11 +86,15 @@ def _build_prompt(task: dict, arm: str, conn) -> tuple[str, dict]:
         text = f"When: {skill['trigger_conditions']}\nProcedure:\n{skill['procedure']}"
         prompt = f"{prompt}\n\nA previously learned procedure you may consider:\n{text}"
         memory_info.update({
-            "injected": 1, "type": "learned_skill", "item_id": skill["id"], 
-            "source_run_id": skill["source_run_id"], "sha256": hashlib.sha256(text.encode()).hexdigest()
+            "injected": 1, 
+            "type": "learned_skill", 
+            "item_id": skill["id"], 
+            "source_run_id": skill["source_run_id"], 
+            "sha256": hashlib.sha256(text.encode()).hexdigest()
         })
 
     return prompt, memory_info
+
 
 def _run_hidden_tests(workspace: Path, hidden_dir: Path) -> tuple[bool, str]:
     with tempfile.TemporaryDirectory() as tmp:
@@ -87,15 +110,20 @@ def _run_hidden_tests(workspace: Path, hidden_dir: Path) -> tuple[bool, str]:
 
         result = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "--no-header"],
-            cwd=str(tmp_path), capture_output=True, text=True, timeout=60,
+            cwd=str(tmp_path), 
+            capture_output=True, 
+            text=True, 
+            timeout=60,
         )
         return result.returncode == 0, (result.stdout + result.stderr).strip()
+
 
 def run_one(task_dir: Path, arm: str, seed: int) -> dict:
     settings = get_settings()
     task = _load_task(task_dir)
     conn = connect(settings.db)
 
+    # 1. Reset workspace and copy buggy repo
     workspace = settings.workspace
     if workspace.exists():
         shutil.rmtree(workspace)
@@ -104,23 +132,33 @@ def run_one(task_dir: Path, arm: str, seed: int) -> dict:
         if src.is_file():
             shutil.copy(src, workspace / src.name)
 
+    # 2. Build prompt and memory metadata
     prompt, mem_info = _build_prompt(task, arm, conn)
     
+    # 3. Run agent
     agent_result = run_task(prompt, settings, arm=arm, seed=seed, benchmark_task_id=task["id"])
+    
+    # 4. Independent verification
     verified_success, test_output = _run_hidden_tests(workspace, task_dir / "hidden_tests")
 
+    # 5. Record results and provenance in DB
     conn.execute(
         "UPDATE runs SET verified_success = ?, memory_injected = ?, memory_type = ?, "
         "memory_item_id = ?, memory_source_run_id = ?, memory_sha256 = ? WHERE id = ?",
         (
-            int(verified_success), mem_info["injected"], mem_info["type"], 
-            mem_info["item_id"], mem_info["source_run_id"], mem_info["sha256"], 
+            int(verified_success), 
+            mem_info["injected"], 
+            mem_info["type"], 
+            mem_info["item_id"], 
+            mem_info["source_run_id"], 
+            mem_info["sha256"], 
             agent_result["run_id"]
         ),
     )
     conn.commit()
     conn.close()
 
+    # 6. Return JSON-friendly dict with token data
     return {
         "task_id": task["id"],
         "arm": arm,
@@ -130,8 +168,12 @@ def run_one(task_dir: Path, arm: str, seed: int) -> dict:
         "verified_success": verified_success,
         "steps": agent_result["steps"],
         "wall_seconds": round(agent_result["wall_seconds"], 1),
+        "prompt_tokens": agent_result.get("prompt_tokens"),
+        "completion_tokens": agent_result.get("completion_tokens"),
+        "total_tokens": agent_result.get("total_tokens"),
         "run_id": agent_result["run_id"],
     }
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

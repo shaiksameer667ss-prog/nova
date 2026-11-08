@@ -1,0 +1,10 @@
+
+id: auth_system
+family: protocol_convention
+repo: auth_system
+language: python
+framework: pytest
+prompt: |
+  The function provision_users in auth.py is failing its tests with a PermissionError.
+  Read the class docstring carefully. It describes a strict token lifecycle.
+  Fix the implementation so it successfully returns the users. Do not modify tests.

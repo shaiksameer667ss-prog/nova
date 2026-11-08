@@ -32,7 +32,6 @@ def main(run_id: str):
     settings = get_settings()
     conn = connect(settings.db)
     
-    # 1. Fetch the run
     run = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if not run:
         print(f"Error: Run ID {run_id} not found.")
@@ -42,7 +41,6 @@ def main(run_id: str):
         print(f"Error: Run ID {run_id} was not independently verified. Refusing to learn from unverified experience.")
         return
 
-    # 2. Fetch the EXACT episode using run_id
     episode = conn.execute("SELECT * FROM episodes WHERE run_id = ?", (run_id,)).fetchone()
     if not episode:
         print(f"Error: Episode not found for run {run_id}.")
@@ -51,13 +49,32 @@ def main(run_id: str):
     trace = json.loads(episode["actions"])
     trace_str = json.dumps(trace, indent=2)
     
-    # 3. Ask the model to extract the skill
     print(f"Extracting skill from verified run {run_id}...")
     client = ModelClient(settings)
     prompt = EXTRACT_PROMPT.format(task_id=run["task_id"], trace=trace_str)
     
-    raw_response = client.chat([{"role": "user", "content": prompt}], temperature=0.1)
+    # Unpack the 3 returned values correctly
+    raw_response, usage_info, status = client.chat_with_usage(
+        [{"role": "user", "content": prompt}], 
+        temperature=0.1
+    )
     
+    # Log the request immediately, before parsing
+    conn.execute(
+        "INSERT INTO model_calls (id, run_id, purpose, model, prompt_tokens, completion_tokens, total_tokens, status, usage_complete, usage_json, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (str(uuid4()), run_id, "skill_extraction", settings.model, 
+         usage_info["prompt_tokens"], usage_info["completion_tokens"], usage_info["total_tokens"],
+         status, int(usage_info["usage_complete"]), usage_info["usage_json"],
+         datetime.now(timezone.utc).isoformat())
+    )
+    conn.commit()
+
+    if status != "success":
+        print(f"Error: Extraction model request failed: {status}")
+        conn.close()
+        return
+
     raw_response = raw_response.strip()
     if raw_response.startswith("```json"):
         raw_response = raw_response[7:-3]
@@ -69,6 +86,7 @@ def main(run_id: str):
     except json.JSONDecodeError:
         print("Error: Model did not return valid JSON. Raw output:")
         print(raw_response)
+        conn.close()
         return
 
     procedure_val = skill_data.get("procedure", "")
@@ -83,7 +101,6 @@ def main(run_id: str):
     else:
         trigger_str = str(trigger_val)
 
-    # 4. Save the skill with strict lineage
     skill_id = str(uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
@@ -109,6 +126,7 @@ def main(run_id: str):
 
     print("\n✅ Skill extracted and saved successfully!")
     print(f"Skill ID: {skill_id}")
+    print(f"Extraction Cost: {usage_info['total_tokens']} tokens (Complete: {usage_info['usage_complete']})")
     print(f"Trigger:  {trigger_str}")
     print(f"Procedure:\n{procedure_str}")
 
