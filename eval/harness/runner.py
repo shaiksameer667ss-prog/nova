@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import hashlib
 from pathlib import Path
 
 import yaml
@@ -11,7 +12,6 @@ from nova.config import get_settings
 from nova.controller.loop import run_task
 from nova.memory.db import connect
 
-# The exact patch from the source task (Counter)
 PATCH_MEMORY = """
 Here is a previous successful code change for a similar problem:
 --- a/counter.py
@@ -24,34 +24,54 @@ Here is a previous successful code change for a similar problem:
          return self._committed
 """
 
+# Strict IDs
+ACQUISITION_RUN_ID = "38d8accd-392a-4483-9180-71abae3d76b0"
+EXTRACTED_SKILL_ID = "41e7d45f-2e84-4be3-99ed-34f21338c58b"
+
 def _load_task(task_dir: Path) -> dict:
     with open(task_dir / "task.yaml", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
-def _build_prompt(task: dict, arm: str, conn) -> str:
+def _build_prompt(task: dict, arm: str, conn) -> tuple[str, dict]:
     prompt = task["prompt"]
+    memory_info = {"injected": 0, "type": None, "item_id": None, "source_run_id": None, "sha256": None}
+    
     gold_label = task.get("gold_skill_arm_label", "GOLD")
     
     if arm == gold_label and task.get("gold_skill"):
-        prompt = f"{prompt}\n\nA previously learned procedure you may consider:\n{task['gold_skill']}"
+        text = task['gold_skill']
+        prompt = f"{prompt}\n\nA previously learned procedure you may consider:\n{text}"
+        memory_info.update({"injected": 1, "type": "gold", "sha256": hashlib.sha256(text.encode()).hexdigest()})
         
     elif arm == "B": # Patch Memory
         prompt = f"{prompt}\n\n{PATCH_MEMORY}"
+        memory_info.update({"injected": 1, "type": "patch", "sha256": hashlib.sha256(PATCH_MEMORY.encode()).hexdigest()})
         
-    elif arm == "C": # Raw Experience
-        # Fetch the trace from the DB (source task: parcel_pipe)
-        episode = conn.execute("SELECT actions FROM episodes WHERE task_id = 'parcel_pipe' LIMIT 1").fetchone()
-        if episode:
-            prompt = f"{prompt}\n\nHere is a raw JSON execution trace of a previous similar task:\n{episode['actions']}"
+    elif arm == "C": # Raw Experience (Strict Lookup + Fail-Fast)
+        episode = conn.execute("SELECT id, actions FROM episodes WHERE run_id = ?", (ACQUISITION_RUN_ID,)).fetchone()
+        if not episode:
+            raise ValueError(f"CRITICAL: Could not find raw experience for run {ACQUISITION_RUN_ID}")
             
-    elif arm == "D": # Learned Skill
-        # Fetch the skill from the DB
-        skill = conn.execute("SELECT trigger_conditions, procedure FROM skills WHERE status = 'candidate' ORDER BY created_at DESC LIMIT 1").fetchone()
-        if skill:
-            skill_text = f"When: {skill['trigger_conditions']}\nProcedure:\n{skill['procedure']}"
-            prompt = f"{prompt}\n\nA previously learned procedure you may consider:\n{skill_text}"
+        text = f"Here is a raw JSON execution trace of a previous similar task:\n{episode['actions']}"
+        prompt = f"{prompt}\n\n{text}"
+        memory_info.update({
+            "injected": 1, "type": "raw_experience", "item_id": episode["id"], 
+            "source_run_id": ACQUISITION_RUN_ID, "sha256": hashlib.sha256(text.encode()).hexdigest()
+        })
+            
+    elif arm == "D": # Learned Skill (Strict Lookup + Fail-Fast)
+        skill = conn.execute("SELECT id, source_run_id, trigger_conditions, procedure FROM skills WHERE id = ?", (EXTRACTED_SKILL_ID,)).fetchone()
+        if not skill:
+            raise ValueError(f"CRITICAL: Could not find learned skill {EXTRACTED_SKILL_ID}")
+            
+        text = f"When: {skill['trigger_conditions']}\nProcedure:\n{skill['procedure']}"
+        prompt = f"{prompt}\n\nA previously learned procedure you may consider:\n{text}"
+        memory_info.update({
+            "injected": 1, "type": "learned_skill", "item_id": skill["id"], 
+            "source_run_id": skill["source_run_id"], "sha256": hashlib.sha256(text.encode()).hexdigest()
+        })
 
-    return prompt
+    return prompt, memory_info
 
 def _run_hidden_tests(workspace: Path, hidden_dir: Path) -> tuple[bool, str]:
     with tempfile.TemporaryDirectory() as tmp:
@@ -67,10 +87,7 @@ def _run_hidden_tests(workspace: Path, hidden_dir: Path) -> tuple[bool, str]:
 
         result = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "--no-header"],
-            cwd=str(tmp_path),
-            capture_output=True,
-            text=True,
-            timeout=60,
+            cwd=str(tmp_path), capture_output=True, text=True, timeout=60,
         )
         return result.returncode == 0, (result.stdout + result.stderr).strip()
 
@@ -87,21 +104,19 @@ def run_one(task_dir: Path, arm: str, seed: int) -> dict:
         if src.is_file():
             shutil.copy(src, workspace / src.name)
 
-    prompt = _build_prompt(task, arm, conn)
+    prompt, mem_info = _build_prompt(task, arm, conn)
     
-    gold_label = task.get("gold_skill_arm_label", "GOLD")
-    memory_injected = (arm in ("B", "C", "D") or (arm == gold_label and bool(task.get("gold_skill"))))
-
-    # Pass the benchmark task ID to the controller
     agent_result = run_task(prompt, settings, arm=arm, seed=seed, benchmark_task_id=task["id"])
-
-    verified_success, test_output = _run_hidden_tests(
-        workspace, task_dir / "hidden_tests"
-    )
+    verified_success, test_output = _run_hidden_tests(workspace, task_dir / "hidden_tests")
 
     conn.execute(
-        "UPDATE runs SET verified_success = ? WHERE id = ?",
-        (int(verified_success), agent_result["run_id"]),
+        "UPDATE runs SET verified_success = ?, memory_injected = ?, memory_type = ?, "
+        "memory_item_id = ?, memory_source_run_id = ?, memory_sha256 = ? WHERE id = ?",
+        (
+            int(verified_success), mem_info["injected"], mem_info["type"], 
+            mem_info["item_id"], mem_info["source_run_id"], mem_info["sha256"], 
+            agent_result["run_id"]
+        ),
     )
     conn.commit()
     conn.close()
@@ -110,12 +125,11 @@ def run_one(task_dir: Path, arm: str, seed: int) -> dict:
         "task_id": task["id"],
         "arm": arm,
         "seed": seed,
-        "memory_injected": memory_injected,
-        "agent_success": agent_result["agent_success"],
+        "memory_injected": bool(mem_info["injected"]),
+        "memory_item_id": mem_info["item_id"],
         "verified_success": verified_success,
         "steps": agent_result["steps"],
         "wall_seconds": round(agent_result["wall_seconds"], 1),
-        "test_output_tail": test_output[-400:] if test_output else "",
         "run_id": agent_result["run_id"],
     }
 

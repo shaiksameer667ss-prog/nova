@@ -32,7 +32,7 @@ def main(run_id: str):
     settings = get_settings()
     conn = connect(settings.db)
     
-    # 1. Fetch the run and its corresponding episode
+    # 1. Fetch the run
     run = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if not run:
         print(f"Error: Run ID {run_id} not found.")
@@ -42,22 +42,22 @@ def main(run_id: str):
         print(f"Error: Run ID {run_id} was not independently verified. Refusing to learn from unverified experience.")
         return
 
-    episode = conn.execute("SELECT * FROM episodes WHERE task_id = ?", (run["task_id"],)).fetchone()
+    # 2. Fetch the EXACT episode using run_id
+    episode = conn.execute("SELECT * FROM episodes WHERE run_id = ?", (run_id,)).fetchone()
     if not episode:
-        print(f"Error: Episode not found for task {run['task_id']}.")
+        print(f"Error: Episode not found for run {run_id}.")
         return
 
     trace = json.loads(episode["actions"])
     trace_str = json.dumps(trace, indent=2)
     
-    # 2. Ask the model to extract the skill
+    # 3. Ask the model to extract the skill
     print(f"Extracting skill from verified run {run_id}...")
     client = ModelClient(settings)
     prompt = EXTRACT_PROMPT.format(task_id=run["task_id"], trace=trace_str)
     
     raw_response = client.chat([{"role": "user", "content": prompt}], temperature=0.1)
     
-    # Clean markdown fences if the model outputs them
     raw_response = raw_response.strip()
     if raw_response.startswith("```json"):
         raw_response = raw_response[7:-3]
@@ -71,7 +71,6 @@ def main(run_id: str):
         print(raw_response)
         return
 
-    # Ensure procedure is a string. If Qwen returned a list, join it.
     procedure_val = skill_data.get("procedure", "")
     if isinstance(procedure_val, list):
         procedure_str = "\n".join(str(item) for item in procedure_val)
@@ -84,19 +83,21 @@ def main(run_id: str):
     else:
         trigger_str = str(trigger_val)
 
-    # 3. Save the skill to the database
+    # 4. Save the skill with strict lineage
     skill_id = str(uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
     conn.execute(
         """INSERT INTO skills 
-           (id, version, created_at, source_task_ids, trigger_conditions, procedure, status) 
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           (id, version, created_at, source_task_ids, source_run_id, source_episode_id, trigger_conditions, procedure, status) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             skill_id, 
             1, 
             now, 
             json.dumps([run["task_id"]]), 
+            run_id,
+            episode["id"],
             trigger_str, 
             procedure_str, 
             "candidate"

@@ -107,10 +107,11 @@ def run_task(task: str, settings: Settings, arm: str = "A", seed: int = 0, bench
         (run_id, task_id, arm, seed, settings.model, int(agent_success),
          0.0, wall, None, finished.isoformat()),
     )
+    # Now includes run_id
     conn.execute(
-        "INSERT INTO episodes (id, task_id, created_at, plan, actions, outcome, success) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (str(uuid4()), task_id, finished.isoformat(), None,
+        "INSERT INTO episodes (id, run_id, task_id, created_at, plan, actions, outcome, success) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (str(uuid4()), run_id, task_id, finished.isoformat(), None,
          json.dumps(transcript), final_summary, int(agent_success)),
     )
     conn.commit()

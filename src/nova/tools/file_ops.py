@@ -30,10 +30,17 @@ def read_file(workspace: Path, path: str) -> str:
 
 
 def list_files(workspace: Path, subdir: str = ".") -> str:
-    root = _safe_path(workspace, subdir)
+    workspace_root = Path(workspace).resolve()
+    root = _safe_path(workspace_root, subdir)
     if not root.exists():
         return "(empty)"
-    entries = sorted(p.relative_to(workspace) for p in root.rglob("*") if p.is_file())
+    
+    # Both paths are absolute now, so relative_to works correctly.
+    entries = sorted(
+        p.relative_to(workspace_root)
+        for p in root.rglob("*")
+        if p.is_file()
+    )
     if not entries:
         return "(empty)"
-    return "\n".join(str(e) for e in entries)
+    return "\n".join(str(entry) for entry in entries)

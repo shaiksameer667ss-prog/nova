@@ -1,0 +1,167 @@
+﻿[
+    {
+        "task_id":  "signal_registry",
+        "arm":  "A",
+        "seed":  0,
+        "memory_injected":  false,
+        "memory_item_id":  null,
+        "verified_success":  true,
+        "steps":  7,
+        "wall_seconds":  23.6,
+        "run_id":  "1ab239d8-fb64-420e-93f3-9d2e2cf09e04"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "A",
+        "seed":  1,
+        "memory_injected":  false,
+        "memory_item_id":  null,
+        "verified_success":  false,
+        "steps":  8,
+        "wall_seconds":  10.6,
+        "run_id":  "e0928e93-c59a-4d1a-a0b3-a33f22a6c9e4"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "A",
+        "seed":  2,
+        "memory_injected":  false,
+        "memory_item_id":  null,
+        "verified_success":  true,
+        "steps":  3,
+        "wall_seconds":  13.0,
+        "run_id":  "8056e048-f524-4369-8850-c8333811f879"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "A",
+        "seed":  3,
+        "memory_injected":  false,
+        "memory_item_id":  null,
+        "verified_success":  true,
+        "steps":  5,
+        "wall_seconds":  20.3,
+        "run_id":  "3517d846-7b5e-474a-8f63-3c7cd2d043b1"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "A",
+        "seed":  4,
+        "memory_injected":  false,
+        "memory_item_id":  null,
+        "verified_success":  false,
+        "steps":  8,
+        "wall_seconds":  11.0,
+        "run_id":  "f875d980-74e5-43ae-82b4-16432ecaeca7"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "C",
+        "seed":  0,
+        "memory_injected":  true,
+        "memory_item_id":  "23488e58-536f-4898-bfdc-d021c813af1b",
+        "verified_success":  true,
+        "steps":  3,
+        "wall_seconds":  13.0,
+        "run_id":  "fcb003c8-c58e-4e4f-9f82-71cc5c009a8a"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "C",
+        "seed":  1,
+        "memory_injected":  true,
+        "memory_item_id":  "23488e58-536f-4898-bfdc-d021c813af1b",
+        "verified_success":  true,
+        "steps":  3,
+        "wall_seconds":  11.4,
+        "run_id":  "44e757ff-1550-4742-aabe-bb7577ac3248"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "C",
+        "seed":  2,
+        "memory_injected":  true,
+        "memory_item_id":  "23488e58-536f-4898-bfdc-d021c813af1b",
+        "verified_success":  true,
+        "steps":  3,
+        "wall_seconds":  11.1,
+        "run_id":  "e27ad1ce-6931-4091-b7ed-38f364ff460a"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "C",
+        "seed":  3,
+        "memory_injected":  true,
+        "memory_item_id":  "23488e58-536f-4898-bfdc-d021c813af1b",
+        "verified_success":  true,
+        "steps":  3,
+        "wall_seconds":  11.4,
+        "run_id":  "f84be10e-ed65-49dc-8d1a-f8b56755b6bb"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "C",
+        "seed":  4,
+        "memory_injected":  true,
+        "memory_item_id":  "23488e58-536f-4898-bfdc-d021c813af1b",
+        "verified_success":  true,
+        "steps":  3,
+        "wall_seconds":  12.3,
+        "run_id":  "c1475b79-e999-4064-89c0-baba489ce0c3"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "D",
+        "seed":  0,
+        "memory_injected":  true,
+        "memory_item_id":  "41e7d45f-2e84-4be3-99ed-34f21338c58b",
+        "verified_success":  true,
+        "steps":  3,
+        "wall_seconds":  15.7,
+        "run_id":  "16625958-73e4-4c27-a756-d83a61a4eea0"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "D",
+        "seed":  1,
+        "memory_injected":  true,
+        "memory_item_id":  "41e7d45f-2e84-4be3-99ed-34f21338c58b",
+        "verified_success":  true,
+        "steps":  3,
+        "wall_seconds":  14.4,
+        "run_id":  "d4060bbb-2ae7-48bf-bdf3-87d1bc8f6b19"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "D",
+        "seed":  2,
+        "memory_injected":  true,
+        "memory_item_id":  "41e7d45f-2e84-4be3-99ed-34f21338c58b",
+        "verified_success":  true,
+        "steps":  3,
+        "wall_seconds":  16.8,
+        "run_id":  "a38f3eea-eb5d-4cab-a991-ac3507007ea7"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "D",
+        "seed":  3,
+        "memory_injected":  true,
+        "memory_item_id":  "41e7d45f-2e84-4be3-99ed-34f21338c58b",
+        "verified_success":  true,
+        "steps":  3,
+        "wall_seconds":  15.1,
+        "run_id":  "d8e082f9-c4f7-4111-b2a6-209aaf84ebe4"
+    },
+    {
+        "task_id":  "signal_registry",
+        "arm":  "D",
+        "seed":  4,
+        "memory_injected":  true,
+        "memory_item_id":  "41e7d45f-2e84-4be3-99ed-34f21338c58b",
+        "verified_success":  true,
+        "steps":  3,
+        "wall_seconds":  16.3,
+        "run_id":  "cf119d02-6bc4-4cf1-a09d-f8d0d49fc0b9"
+    }
+]
