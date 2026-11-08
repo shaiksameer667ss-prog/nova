@@ -1,27 +1,11 @@
-# NOVA: Evidence of Procedural Transfer in 4B Models
+# NOVA: Preliminary Protocol-X Transfer Experiment
 
-## Abstract
-We investigate whether a 4B parameter language model can extract a generalizable procedural skill from a verified experience, and use that skill to solve a structurally similar task in a different domain where it previously failed. 
+## Summary
+In a preliminary synthetic transfer experiment, the learned-skill condition achieved 5/5 verified successes, compared with 3/5 for the no-memory condition. The learned-skill condition used 3 agent-loop steps per run; successful no-memory runs averaged 5 steps. The sample is small (n=5), the success-rate difference is not statistically significant (p=0.22), and the causes of the two baseline failures require further investigation. These results motivate larger, controlled evaluations of procedural extraction and transfer.
 
-Our results demonstrate that while the baseline model (Qwen 3.5 4B Q4) struggles with arbitrary, out-of-distribution rules (60% success rate), injecting a procedurally extracted skill raises success to 100% and halves the number of required reasoning steps (6.2 steps -> 3.0 steps).
-
-## Methodology
-- **Acquisition:** NOVA was given a task (`parcel_pipe`) containing a fictional, arbitrary security rule ("Protocol-X": mutations invalidate auth, requiring a refresh before finalize). It solved the task and its execution trace was independently verified by a harness.
-- **Extraction:** A separate LLM call extracted a diagnostic procedure from the trace, generalizing the rule without hardcoding the specific variable names.
-- **Deployment:** NOVA was given a new task (`signal_registry`) in a different domain with different names, but governed by the exact same underlying rule.
-- **Evaluation:** The deployment task was run across 5 seeds for Arm A (Baseline) and Arm D (Learned Skill).
-
-## Results
-
-| Arm | Memory | Success Rate | Avg Steps | Output |
-| :--- | :--- | :--- | :--- | :--- |
-| **A** | None | 3/5 (60%) | 6.2 | Fails with `ConnectionError` on seeds 1 & 4. |
-| **D** | Learned Skill | 5/5 (100%) | 3.0 | Consistent, optimal solution every time. |
-
-## Conclusion
-Procedural memory extraction is not merely an optimization for capable models; it is a mechanism to overcome capability ceilings in out-of-distribution tasks. By abstracting a specific experience into a generalizable diagnostic rule, the agent was able to apply knowledge acquired in one environment to solve an entirely novel problem in another environment.
+## What this experiment actually tests
+The acquisition task (`parcel_pipe`) explicitly presented the "Protocol-X" rule in its docstring. Therefore, this experiment tests whether NOVA can **extract an instructed procedure from a verified trace and transfer it to a new domain**, not whether it can autonomously discover a hidden rule.
 
 ## Artifacts
-- Fully reproducible local agent and independent verification harness.
-- Python-based dataset generation and extraction pipeline.
-- Zero cloud costs, local execution on RTX 3070 (8GB VRAM).
+- Source run: `38d8accd-392a-4483-9180-71abae3d76b0`
+- Extracted Skill ID: `564d3109-6c86-47ea-a576-1aa287b72155`
