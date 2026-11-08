@@ -1,0 +1,22 @@
+id: task_001
+family: off_by_one
+repo: task_001
+language: python
+framework: pytest
+transfer_bucket: near
+
+prompt: |
+  The function sum_to(n) in calc.py is supposed to return
+  the sum of integers from 1 to n inclusive. It currently
+  fails its tests. Fix the bug. Do not modify tests.
+
+gold_skill: |
+  When a loop's range excludes the last required element,
+  check whether the loop bound should be inclusive. For a
+  sum from 1 to n inclusive, use range(1, n + 1), not
+  range(n).
+
+hidden_test_file: hidden_tests/test_calc.py
+max_steps: 10
+max_tokens: 50000
+max_wall_seconds: 300

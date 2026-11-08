@@ -1,0 +1,50 @@
+id: scan_state
+family: state_management
+repo: scan_state
+language: python
+framework: pytest
+purpose: capability_screen
+gold_skill_arm_label: GOLD
+
+screening_seeds: [0, 1, 2, 3, 4]
+confirmatory_seeds: [5, 6, 7, 8, 9]
+
+prompt: |
+  The Counter class in counter.py supports deferred commits via
+  flush(). Its contract:
+
+  - increment(n) queues an increment without committing it.
+  - flush() commits all queued increments and returns the total
+    committed value. Repeated flush() calls with no new increments
+    must return the same value: each increment is applied exactly
+    once.
+  - value_or(default) returns the committed value, or default if
+    nothing has been committed yet.
+
+  It currently fails its tests. Fix the implementation. Do not
+  modify tests or the documented contract.
+
+gold_skill: |
+  Diagnostic method for state-tracking bugs:
+
+  1. Trace the object's internal state across a sequence of calls.
+     Write down what each field holds after increment, after flush,
+     and after a second flush.
+
+  2. Identify which operations produce a value and which commit
+     state. They are often conflated when a single method does both.
+
+  3. Check whether committing an operation also clears the pending
+     buffer. If it does not, the same input will be committed twice.
+
+  4. Test repeated operations with no new input. If a second flush
+     returns a different value than the first with no intervening
+     increments, the commit step is not idempotent.
+
+  5. Verify that the state transition preserves the documented
+     invariant: each queued increment is applied exactly once.
+
+hidden_test_file: hidden_tests/test_counter.py
+max_steps: 10
+max_tokens: 50000
+max_wall_seconds: 300

@@ -1,0 +1,29 @@
+id: task_002
+family: stability_violation
+repo: task_002
+language: python
+framework: pytest
+transfer_bucket: near
+gold_skill_arm_label: GOLD
+
+prompt: |
+  The function sort_by_priority in sort_items.py is supposed to sort
+  items by priority ascending, while preserving insertion order for
+  items of equal priority (stable sort). It currently fails its tests.
+  Fix the bug. Do not modify tests.
+
+gold_skill: |
+  Diagnostic method for stability bugs in recursive sorts:
+  1. Identify where the merge step compares elements from left and
+     right partitions.
+  2. Determine the tie-breaking rule: on equal keys, which partition's
+     element should come first to preserve stability?
+  3. Check the comparison operator: < vs <= determines whether ties
+     go right or left.
+  4. Verify by hand: sort [{p:1,a}, {p:1,b}] and check that 'a' stays
+     before 'b'.
+
+hidden_test_file: hidden_tests/test_sort.py
+max_steps: 10
+max_tokens: 50000
+max_wall_seconds: 300

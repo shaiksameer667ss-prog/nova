@@ -1,0 +1,30 @@
+id: scan_config
+family: multi_file_config
+repo: scan_config
+language: python
+framework: pytest
+transfer_bucket: near
+gold_skill_arm_label: GOLD
+
+prompt: |
+  The function make_client in client.py should construct a fresh
+  configuration based on defaults imported from config.py, then apply
+  any supplied overrides. Currently it returns incorrect default
+  values. Fix the implementation. Do not modify config.py. Do not
+  modify or execute tests.
+
+gold_skill: |
+  Diagnostic method for multi-file bugs where output has wrong
+  default values:
+  1. Check whether the function builds its own literal values
+     instead of referencing the imported source of truth.
+  2. Confirm that the expected defaults come from the imported
+     module, not from a hardcoded dict.
+  3. Ensure overrides are applied on top of the imported defaults,
+     not on top of new literals.
+  4. Do not mutate the imported defaults object.
+
+hidden_test_file: hidden_tests/test_client.py
+max_steps: 10
+max_tokens: 50000
+max_wall_seconds: 300

@@ -1,0 +1,33 @@
+# Task scan_state — SCREENED OUT
+
+## Pre-run validity
+- [x] Hidden tests fail on original buggy code (3 failed, 4 passed)
+- [x] Three tests fail for the intended defect (missing pending-queue clear)
+- [x] Contract checked (value_or + flush behavior)
+- [x] Independent harness used (temp-dir pytest, agent never sees hidden tests)
+
+## Arm A — Baseline
+
+| Seed | Verified | Steps | Seconds |
+|---|---|---:|---:|
+| 0 | true | 3 | 28.4 |
+| 1 | true | 3 | 10.9 |
+| 2 | true | 3 | 12.7 |
+| 3 | true | 3 | 11.4 |
+| 4 | true | 3 | 12.8 |
+
+Success rate: 5/5 (100%)
+
+## Decision
+
+STATUS: TOO EASY FOR BASELINE DISCRIMINATION
+
+Reason: Qwen 4B Q4 solved the state-management defect without
+procedural skill injection across all five screening seeds. GOLD
+evaluation not performed because baseline showed no observed failures.
+
+This task is excluded from the proposed reliability comparison.
+
+Important limitation: this result does not demonstrate that procedural
+skills provide no benefit. It demonstrates that this task provides
+insufficient baseline headroom for measuring an improvement.
