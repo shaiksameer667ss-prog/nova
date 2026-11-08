@@ -1,0 +1,25 @@
+{
+  "generation": 1,
+  "status": "success",
+  "created_at": "2026-11-08T15:17:57.236498+00:00",
+  "model": "qwen3.5:4b",
+  "parent_prompt": "v0.txt",
+  "parent_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "generator_prompt_tokens": 1179,
+  "generator_completion_tokens": 87,
+  "generator_total_tokens": 1266,
+  "generator_usage_complete": true,
+  "generator_finish_reason": "stop",
+  "generator_response_sha256": "a3ebd0f3261958402d79ba17b18b51607dd863d624021c3495f28ee763dceff7",
+  "training_tasks": [
+    "inventory_batch",
+    "scan_state"
+  ],
+  "training_run_count": 10,
+  "diagnostic_run_id": "312c856d-0331-4e66-b49c-65183735636b",
+  "candidate_status": "generated_not_promoted",
+  "candidate_file": "data\\prompts\\v1_candidate_attempt3.txt",
+  "candidate_sha256": "eec3dc8b282e5b57c5e8a341904621cec6b60642ad89c041f130226d0c6c3f74",
+  "candidate_characters": 1016,
+  "addition_characters": 366
+}

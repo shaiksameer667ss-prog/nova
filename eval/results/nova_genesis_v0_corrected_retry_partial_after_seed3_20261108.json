@@ -1,0 +1,50 @@
+[
+    {
+        "task_id":  "inventory_batch",
+        "arm":  "V0_CORRECTED",
+        "seed":  0,
+        "memory_injected":  false,
+        "memory_item_id":  null,
+        "verified_success":  true,
+        "steps":  5,
+        "wall_seconds":  19.8,
+        "prompt_tokens":  2498,
+        "completion_tokens":  1322,
+        "total_tokens":  3820,
+        "run_id":  "58d2897c-2e23-4f6e-9c1c-416ffbf6501a",
+        "system_prompt_sha256":  "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+        "system_prompt_source":  "C:\\Users\\Shahid\\Downloads\\nova\\data\\prompts\\v0.txt"
+    },
+    {
+        "task_id":  "inventory_batch",
+        "arm":  "V0_CORRECTED",
+        "seed":  2,
+        "memory_injected":  false,
+        "memory_item_id":  null,
+        "verified_success":  true,
+        "steps":  6,
+        "wall_seconds":  23.5,
+        "prompt_tokens":  3097,
+        "completion_tokens":  1567,
+        "total_tokens":  4664,
+        "run_id":  "22395bfc-8be3-4b81-9a85-b3a90b6b9cc8",
+        "system_prompt_sha256":  "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+        "system_prompt_source":  "C:\\Users\\Shahid\\Downloads\\nova\\data\\prompts\\v0.txt"
+    },
+    {
+        "task_id":  "inventory_batch",
+        "arm":  "V0_CORRECTED",
+        "seed":  3,
+        "memory_injected":  false,
+        "memory_item_id":  null,
+        "verified_success":  false,
+        "steps":  8,
+        "wall_seconds":  35.1,
+        "prompt_tokens":  4197,
+        "completion_tokens":  2359,
+        "total_tokens":  6556,
+        "run_id":  "a1f780b5-b6c2-4e33-b5e9-da9c925485a1",
+        "system_prompt_sha256":  "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+        "system_prompt_source":  "C:\\Users\\Shahid\\Downloads\\nova\\data\\prompts\\v0.txt"
+    }
+]

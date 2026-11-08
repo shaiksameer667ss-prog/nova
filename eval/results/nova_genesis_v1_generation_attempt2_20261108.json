@@ -1,0 +1,21 @@
+{
+  "generation": 1,
+  "status": "success",
+  "created_at": "2026-11-08T15:13:34.354472+00:00",
+  "model": "qwen3.5:4b",
+  "parent_prompt": "v0.txt",
+  "parent_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "generator_prompt_tokens": 1177,
+  "generator_completion_tokens": 512,
+  "generator_total_tokens": 1689,
+  "generator_usage_complete": true,
+  "generator_finish_reason": "length",
+  "generator_response_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "training_tasks": [
+    "inventory_batch",
+    "scan_state"
+  ],
+  "training_run_count": 10,
+  "diagnostic_run_id": "312c856d-0331-4e66-b49c-65183735636b",
+  "candidate_status": "not_generated"
+}

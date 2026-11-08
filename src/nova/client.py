@@ -30,7 +30,9 @@ class ModelClient:
             response = self._client.post("/chat/completions", json=payload)
             response.raise_for_status()
             data = response.json()
-            content = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            content = choice["message"]["content"]
+            finish_reason = choice.get("finish_reason")
             
             raw_usage = data.get("usage")
             required = ("prompt_tokens", "completion_tokens", "total_tokens")
@@ -58,7 +60,8 @@ class ModelClient:
                 "completion_tokens": c_tok,
                 "total_tokens": t_tok,
                 "usage_complete": is_complete,
-                "usage_json": json.dumps(raw_usage) if raw_usage else None
+                "usage_json": json.dumps(raw_usage) if raw_usage else None,
+                "finish_reason": finish_reason
             }
             return content, usage_info, "success"
             
@@ -68,7 +71,8 @@ class ModelClient:
                 "completion_tokens": None,
                 "total_tokens": None,
                 "usage_complete": False,
-                "usage_json": None
+                "usage_json": None,
+                "finish_reason": None
             }
             return "", usage_info, f"error: {type(e).__name__}: {str(e)}"
 

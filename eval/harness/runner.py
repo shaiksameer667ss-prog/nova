@@ -4,12 +4,13 @@ import subprocess
 import sys
 import tempfile
 import hashlib
+import os
 from pathlib import Path
 
 import yaml
 
 from nova.config import get_settings
-from nova.controller.loop import run_task
+from nova.controller.loop import SYSTEM_PROMPT, run_task
 from nova.memory.db import connect
 
 PATCH_MEMORY = """
@@ -137,8 +138,43 @@ def run_one(task_dir: Path, arm: str, seed: int) -> dict:
     # 2. Build prompt and memory metadata
     prompt, mem_info = _build_prompt(task, arm, conn)
     
-    # 3. Run agent
-    agent_result = run_task(prompt, settings, arm=arm, seed=seed, benchmark_task_id=task["id"])
+    # 3. Load optional external system prompt.
+    prompt_file = os.environ.get("NOVA_SYSTEM_PROMPT_FILE")
+    prompt_path = None
+    system_prompt = None
+
+    if prompt_file:
+        prompt_path = Path(prompt_file).expanduser()
+        if not prompt_path.is_absolute():
+            prompt_path = Path.cwd() / prompt_path
+        prompt_path = prompt_path.resolve()
+
+        if not prompt_path.is_file():
+            raise FileNotFoundError(
+                f"NOVA system prompt file does not exist: {prompt_path}"
+            )
+
+        system_prompt = prompt_path.read_text(encoding="utf-8-sig")
+
+        if not system_prompt.strip():
+            raise ValueError("NOVA system prompt file is empty.")
+
+    effective_system_prompt = (
+        system_prompt if system_prompt is not None else SYSTEM_PROMPT
+    )
+    system_prompt_sha256 = hashlib.sha256(
+        effective_system_prompt.encode("utf-8")
+    ).hexdigest()
+
+    # 4. Run agent.
+    agent_result = run_task(
+        prompt,
+        settings,
+        arm=arm,
+        seed=seed,
+        benchmark_task_id=task["id"],
+        system_prompt=system_prompt,
+    )
     
     # 4. Independent verification
     verified_success, test_output = _run_hidden_tests(workspace, task_dir / "hidden_tests")
@@ -174,6 +210,8 @@ def run_one(task_dir: Path, arm: str, seed: int) -> dict:
         "completion_tokens": agent_result.get("completion_tokens"),
         "total_tokens": agent_result.get("total_tokens"),
         "run_id": agent_result["run_id"],
+        "system_prompt_sha256": system_prompt_sha256,
+        "system_prompt_source": str(prompt_path) if prompt_path else "default",
     }
 
 

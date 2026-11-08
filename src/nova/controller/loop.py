@@ -1,4 +1,5 @@
 import json
+import hashlib
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -43,7 +44,14 @@ def _dispatch(action: dict, settings: Settings) -> str:
         return list_files(settings.workspace, action.get("subdir", "."))
     raise ValueError(f"unknown action: {kind}")
 
-def run_task(task: str, settings: Settings, arm: str = "A", seed: int = 0, benchmark_task_id: str | None = None) -> dict:
+def run_task(
+    task: str,
+    settings: Settings,
+    arm: str = "A",
+    seed: int = 0,
+    benchmark_task_id: str | None = None,
+    system_prompt: str | None = None,
+) -> dict:
     settings.workspace.mkdir(parents=True, exist_ok=True)
     client = ModelClient(settings)
     conn = connect(settings.db)
@@ -53,7 +61,7 @@ def run_task(task: str, settings: Settings, arm: str = "A", seed: int = 0, bench
     started = datetime.now(timezone.utc)
 
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt if system_prompt is not None else SYSTEM_PROMPT},
         {"role": "user", "content": f"Task: {task}"},
     ]
 
@@ -91,10 +99,21 @@ def run_task(task: str, settings: Settings, arm: str = "A", seed: int = 0, bench
         
         try:
             action = _parse_action(raw)
-        except json.JSONDecodeError:
-            messages.append({"role": "assistant", "content": raw})
+        except json.JSONDecodeError as exc:
+            # Preserve the original retry behavior for this experiment.
+            # Do not feed malformed assistant output back into the model context.
             messages.append({"role": "user", "content": "Your last message was not valid JSON. Reply with JSON only."})
-            transcript.append({"step": step, "error": "bad json", "raw": raw[:200]})
+
+            transcript.append({
+                "step": step,
+                "error": "bad json",
+                "raw": raw[:20000],
+                "raw_length": len(raw),
+                "raw_truncated": len(raw) > 20000,
+                "raw_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                "parse_error": str(exc),
+                "finish_reason": usage_info.get("finish_reason"),
+            })
             continue
 
         transcript.append({"step": step, "assistant_output": raw, "action": action})

@@ -1,0 +1,593 @@
+{
+  "experiment": "NOVA-Genesis Generation 0 baseline",
+  "date": "2026-11-08",
+  "prompt_generation": "V0",
+  "prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "tasks": [
+    "inventory_batch",
+    "scan_state"
+  ],
+  "summary": {
+    "inventory_batch": {
+      "runs": 5,
+      "verified_successes": 5,
+      "mean_steps": 5,
+      "mean_tokens": 4758,
+      "median_tokens": 4707,
+      "all_ledgers_reconcile": true
+    },
+    "scan_state": {
+      "runs": 5,
+      "verified_successes": 5,
+      "mean_steps": 3,
+      "mean_tokens": 2489.6,
+      "median_tokens": 2470,
+      "all_ledgers_reconcile": true
+    }
+  },
+  "total_runs": 10,
+  "all_verified": true,
+  "all_accounting_reconciled": true,
+  "runs": [
+    {
+      "run_id": "87497fa0-058d-4722-bc2e-4c0e326ce270",
+      "task_id": "inventory_batch",
+      "family": "state_management",
+      "arm": "A",
+      "seed": 0,
+      "verified_success": true,
+      "steps": 5,
+      "wall_seconds": 27.828385,
+      "prompt_tokens": 3498,
+      "completion_tokens": 1209,
+      "total_tokens": 4707,
+      "usage_complete": true,
+      "memory_injected": false,
+      "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+      "system_prompt_source": "data/prompts/v0.txt",
+      "prompt_hash_evidence": "Confirmed in runner output at execution; not independently persisted in the SQLite run row.",
+      "model_calls": [
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 249,
+          "completion_tokens": 91,
+          "total_tokens": 340,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 459,
+          "completion_tokens": 348,
+          "total_tokens": 807,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 695,
+          "completion_tokens": 296,
+          "total_tokens": 991,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 931,
+          "completion_tokens": 284,
+          "total_tokens": 1215,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 1164,
+          "completion_tokens": 190,
+          "total_tokens": 1354,
+          "status": "success",
+          "usage_complete": 1
+        }
+      ]
+    },
+    {
+      "run_id": "9f1a9b8c-5ca7-44ce-8e73-2b33a46fb939",
+      "task_id": "inventory_batch",
+      "family": "state_management",
+      "arm": "A",
+      "seed": 1,
+      "verified_success": true,
+      "steps": 6,
+      "wall_seconds": 22.696915,
+      "prompt_tokens": 4901,
+      "completion_tokens": 1494,
+      "total_tokens": 6395,
+      "usage_complete": true,
+      "memory_injected": false,
+      "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+      "system_prompt_source": "data/prompts/v0.txt",
+      "prompt_hash_evidence": "Confirmed in runner output at execution; not independently persisted in the SQLite run row.",
+      "model_calls": [
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 249,
+          "completion_tokens": 81,
+          "total_tokens": 330,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 459,
+          "completion_tokens": 319,
+          "total_tokens": 778,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 695,
+          "completion_tokens": 289,
+          "total_tokens": 984,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 931,
+          "completion_tokens": 316,
+          "total_tokens": 1247,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 1167,
+          "completion_tokens": 271,
+          "total_tokens": 1438,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 1400,
+          "completion_tokens": 218,
+          "total_tokens": 1618,
+          "status": "success",
+          "usage_complete": 1
+        }
+      ]
+    },
+    {
+      "run_id": "aeb8fb45-ec20-4096-bd2b-55cdb2f826eb",
+      "task_id": "inventory_batch",
+      "family": "state_management",
+      "arm": "A",
+      "seed": 2,
+      "verified_success": true,
+      "steps": 4,
+      "wall_seconds": 13.588024,
+      "prompt_tokens": 2336,
+      "completion_tokens": 803,
+      "total_tokens": 3139,
+      "usage_complete": true,
+      "memory_injected": false,
+      "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+      "system_prompt_source": "data/prompts/v0.txt",
+      "prompt_hash_evidence": "Confirmed in runner output at execution; not independently persisted in the SQLite run row.",
+      "model_calls": [
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 249,
+          "completion_tokens": 65,
+          "total_tokens": 314,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 459,
+          "completion_tokens": 326,
+          "total_tokens": 785,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 695,
+          "completion_tokens": 286,
+          "total_tokens": 981,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 933,
+          "completion_tokens": 126,
+          "total_tokens": 1059,
+          "status": "success",
+          "usage_complete": 1
+        }
+      ]
+    },
+    {
+      "run_id": "a44aa166-7b90-41ec-a1db-203556981aeb",
+      "task_id": "inventory_batch",
+      "family": "state_management",
+      "arm": "A",
+      "seed": 3,
+      "verified_success": true,
+      "steps": 6,
+      "wall_seconds": 21.7132,
+      "prompt_tokens": 4901,
+      "completion_tokens": 1403,
+      "total_tokens": 6304,
+      "usage_complete": true,
+      "memory_injected": false,
+      "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+      "system_prompt_source": "data/prompts/v0.txt",
+      "prompt_hash_evidence": "Confirmed in runner output at execution; not independently persisted in the SQLite run row.",
+      "model_calls": [
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 249,
+          "completion_tokens": 81,
+          "total_tokens": 330,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 459,
+          "completion_tokens": 328,
+          "total_tokens": 787,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 695,
+          "completion_tokens": 307,
+          "total_tokens": 1002,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 931,
+          "completion_tokens": 288,
+          "total_tokens": 1219,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 1167,
+          "completion_tokens": 275,
+          "total_tokens": 1442,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 1400,
+          "completion_tokens": 124,
+          "total_tokens": 1524,
+          "status": "success",
+          "usage_complete": 1
+        }
+      ]
+    },
+    {
+      "run_id": "0c4d2276-a79a-47ff-9c68-a185659e4c1d",
+      "task_id": "inventory_batch",
+      "family": "state_management",
+      "arm": "A",
+      "seed": 4,
+      "verified_success": true,
+      "steps": 4,
+      "wall_seconds": 15.209294,
+      "prompt_tokens": 2336,
+      "completion_tokens": 909,
+      "total_tokens": 3245,
+      "usage_complete": true,
+      "memory_injected": false,
+      "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+      "system_prompt_source": "data/prompts/v0.txt",
+      "prompt_hash_evidence": "Confirmed in runner output at execution; not independently persisted in the SQLite run row.",
+      "model_calls": [
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 249,
+          "completion_tokens": 81,
+          "total_tokens": 330,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 459,
+          "completion_tokens": 337,
+          "total_tokens": 796,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 695,
+          "completion_tokens": 294,
+          "total_tokens": 989,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 933,
+          "completion_tokens": 197,
+          "total_tokens": 1130,
+          "status": "success",
+          "usage_complete": 1
+        }
+      ]
+    },
+    {
+      "run_id": "8783782a-2c17-4c56-a77f-2cb4668f93e1",
+      "task_id": "scan_state",
+      "family": "state_management",
+      "arm": "A",
+      "seed": 0,
+      "verified_success": true,
+      "steps": 3,
+      "wall_seconds": 15.878649,
+      "prompt_tokens": 1738,
+      "completion_tokens": 1007,
+      "total_tokens": 2745,
+      "usage_complete": true,
+      "memory_injected": false,
+      "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+      "system_prompt_source": "data/prompts/v0.txt",
+      "prompt_hash_evidence": "Confirmed in runner output at execution; not independently persisted in the SQLite run row.",
+      "model_calls": [
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 308,
+          "completion_tokens": 54,
+          "total_tokens": 362,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 574,
+          "completion_tokens": 701,
+          "total_tokens": 1275,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 856,
+          "completion_tokens": 252,
+          "total_tokens": 1108,
+          "status": "success",
+          "usage_complete": 1
+        }
+      ]
+    },
+    {
+      "run_id": "06b3ab72-3cab-4343-b802-95d947eda642",
+      "task_id": "scan_state",
+      "family": "state_management",
+      "arm": "A",
+      "seed": 1,
+      "verified_success": true,
+      "steps": 3,
+      "wall_seconds": 11.394981,
+      "prompt_tokens": 1738,
+      "completion_tokens": 631,
+      "total_tokens": 2369,
+      "usage_complete": true,
+      "memory_injected": false,
+      "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+      "system_prompt_source": "data/prompts/v0.txt",
+      "prompt_hash_evidence": "Confirmed in runner output at execution; not independently persisted in the SQLite run row.",
+      "model_calls": [
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 308,
+          "completion_tokens": 54,
+          "total_tokens": 362,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 574,
+          "completion_tokens": 377,
+          "total_tokens": 951,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 856,
+          "completion_tokens": 200,
+          "total_tokens": 1056,
+          "status": "success",
+          "usage_complete": 1
+        }
+      ]
+    },
+    {
+      "run_id": "5500a54f-c697-484c-82bb-f595588e3686",
+      "task_id": "scan_state",
+      "family": "state_management",
+      "arm": "A",
+      "seed": 2,
+      "verified_success": true,
+      "steps": 3,
+      "wall_seconds": 12.872103,
+      "prompt_tokens": 1738,
+      "completion_tokens": 746,
+      "total_tokens": 2484,
+      "usage_complete": true,
+      "memory_injected": false,
+      "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+      "system_prompt_source": "data/prompts/v0.txt",
+      "prompt_hash_evidence": "Confirmed in runner output at execution; not independently persisted in the SQLite run row.",
+      "model_calls": [
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 308,
+          "completion_tokens": 114,
+          "total_tokens": 422,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 574,
+          "completion_tokens": 399,
+          "total_tokens": 973,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 856,
+          "completion_tokens": 233,
+          "total_tokens": 1089,
+          "status": "success",
+          "usage_complete": 1
+        }
+      ]
+    },
+    {
+      "run_id": "5cf9cb38-a7c2-4973-8962-bbb69ef19ae6",
+      "task_id": "scan_state",
+      "family": "state_management",
+      "arm": "A",
+      "seed": 3,
+      "verified_success": true,
+      "steps": 3,
+      "wall_seconds": 11.843576,
+      "prompt_tokens": 1738,
+      "completion_tokens": 642,
+      "total_tokens": 2380,
+      "usage_complete": true,
+      "memory_injected": false,
+      "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+      "system_prompt_source": "data/prompts/v0.txt",
+      "prompt_hash_evidence": "Confirmed in runner output at execution; not independently persisted in the SQLite run row.",
+      "model_calls": [
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 308,
+          "completion_tokens": 54,
+          "total_tokens": 362,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 574,
+          "completion_tokens": 393,
+          "total_tokens": 967,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 856,
+          "completion_tokens": 195,
+          "total_tokens": 1051,
+          "status": "success",
+          "usage_complete": 1
+        }
+      ]
+    },
+    {
+      "run_id": "e24e48bc-b8a3-4149-9057-e55bdadc5234",
+      "task_id": "scan_state",
+      "family": "state_management",
+      "arm": "A",
+      "seed": 4,
+      "verified_success": true,
+      "steps": 3,
+      "wall_seconds": 13.710427,
+      "prompt_tokens": 1738,
+      "completion_tokens": 732,
+      "total_tokens": 2470,
+      "usage_complete": true,
+      "memory_injected": false,
+      "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+      "system_prompt_source": "data/prompts/v0.txt",
+      "prompt_hash_evidence": "Confirmed in runner output at execution; not independently persisted in the SQLite run row.",
+      "model_calls": [
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 308,
+          "completion_tokens": 54,
+          "total_tokens": 362,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 574,
+          "completion_tokens": 429,
+          "total_tokens": 1003,
+          "status": "success",
+          "usage_complete": 1
+        },
+        {
+          "purpose": "agent_step",
+          "model": "qwen3.5:4b",
+          "prompt_tokens": 856,
+          "completion_tokens": 249,
+          "total_tokens": 1105,
+          "status": "success",
+          "usage_complete": 1
+        }
+      ]
+    }
+  ]
+}
