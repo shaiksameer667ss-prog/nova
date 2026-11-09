@@ -1,18 +1,16 @@
-from unittest.mock import MagicMock, patch
 import sqlite3
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from nova.config import Settings
 from nova.controller.loop import (
     LOOP_GUARD_THRESHOLD,
-    LOOP_GUARD_TOOL,
     NOVA_ACTION_SCHEMA,
     NOVA_RESPONSE_FORMAT,
     _validate_action,
     run_task,
 )
-
 
 # =========================================================================
 # Test helpers
@@ -223,3 +221,181 @@ def test_model_error_is_recorded_in_database(tmp_path):
 
     assert row is not None, "run was not written to database"
     assert row["termination_reason"] == "model_error"
+def test_cross_tool_failures_trigger_guard_and_are_journaled(tmp_path):
+    import json
+    import sqlite3
+
+    settings = _make_settings(tmp_path)
+    outputs = [
+        '{"action":"read_file","path":"a.py"}',
+        '{"action":"write_file","path":"a.py","content":"x"}',
+        '{"action":"list_files"}',
+    ]
+
+    with patch("nova.controller.loop.ModelClient") as MockClient, \
+         patch("nova.controller.loop._dispatch") as mock_dispatch:
+
+        mock_client = MockClient.return_value
+        mock_client.chat_with_usage.side_effect = [
+            (raw, _fake_usage(), "success") for raw in outputs
+        ]
+        mock_client.close = MagicMock()
+        mock_dispatch.side_effect = [
+            ValueError("shared synthetic failure"),
+            ValueError("shared synthetic failure"),
+            ValueError("shared synthetic failure"),
+        ]
+
+        result = run_task("cross-tool failure test", settings)
+
+    assert result["stop_reason"] == "loop_detected"
+    assert result["steps"] == 3
+    assert mock_dispatch.call_count == 3
+
+    conn = sqlite3.connect(settings.db)
+    rows = conn.execute(
+        """
+        SELECT action_name, status, error_fingerprint
+        FROM action_executions
+        WHERE run_id = ?
+        ORDER BY step
+        """,
+        (result["run_id"],),
+    ).fetchall()
+
+    assert [row[0] for row in rows] == [
+        "read_file", "write_file", "list_files"
+    ]
+    assert [row[1] for row in rows] == [
+        "failed", "uncertain", "failed"
+    ]
+    assert len({row[2] for row in rows}) == 1
+
+    episode = conn.execute(
+        "SELECT actions FROM episodes WHERE run_id = ?",
+        (result["run_id"],),
+    ).fetchone()
+    transcript = json.loads(episode[0])
+    assert [
+        item["failure_occurrence_count"] for item in transcript
+    ] == [1, 2, 3]
+    assert transcript[-1]["guard_triggered"] is True
+
+    run = conn.execute(
+        "SELECT termination_reason FROM runs WHERE id = ?",
+        (result["run_id"],),
+    ).fetchone()
+    assert run[0] == "loop_detected"
+    conn.close()
+
+
+def test_successful_retry_prevents_cross_tool_false_stop(tmp_path):
+    import sqlite3
+
+    settings = _make_settings(tmp_path)
+    outputs = [
+        '{"action":"read_file","path":"a.py"}',
+        '{"action":"write_file","path":"a.py","content":"x"}',
+        '{"action":"read_file","path":"a.py"}',
+        '{"action":"list_files"}',
+        '{"action":"done","summary":"recovered"}',
+    ]
+
+    with patch("nova.controller.loop.ModelClient") as MockClient, \
+         patch("nova.controller.loop._dispatch") as mock_dispatch:
+
+        mock_client = MockClient.return_value
+        mock_client.chat_with_usage.side_effect = [
+            (raw, _fake_usage(), "success") for raw in outputs
+        ]
+        mock_client.close = MagicMock()
+        mock_dispatch.side_effect = [
+            ValueError("shared synthetic failure"),
+            ValueError("shared synthetic failure"),
+            "file contents",
+            ValueError("shared synthetic failure"),
+        ]
+
+        result = run_task("recovery test", settings)
+
+    assert result["stop_reason"] == "completed"
+    assert mock_dispatch.call_count == 4
+
+    conn = sqlite3.connect(settings.db)
+    rows = conn.execute(
+        """
+        SELECT action_name, status
+        FROM action_executions
+        WHERE run_id = ?
+        ORDER BY step
+        """,
+        (result["run_id"],),
+    ).fetchall()
+
+    assert [row[1] for row in rows] == [
+        "failed", "uncertain", "succeeded", "failed", "succeeded"
+    ]
+    conn.close()
+
+
+
+def test_model_client_closes_when_database_connect_fails(tmp_path):
+    settings = _make_settings(tmp_path)
+
+    with (
+        patch("nova.controller.loop.ModelClient") as MockClient,
+        patch(
+            "nova.controller.loop.connect",
+            side_effect=RuntimeError("database unavailable"),
+        ),pytest.raises(RuntimeError, match="database unavailable")
+    ):
+        run_task("cleanup test", settings)
+
+    MockClient.return_value.close.assert_called_once_with()
+
+
+def test_resources_close_when_controller_execution_raises(tmp_path):
+    from nova.memory.db import connect as db_connect
+
+    settings = _make_settings(tmp_path)
+    captured = {}
+
+    def tracking_connect(db_path):
+        captured["connection"] = db_connect(db_path)
+        return captured["connection"]
+
+    with (
+        patch("nova.controller.loop.ModelClient") as MockClient,
+        patch("nova.controller.loop.connect", side_effect=tracking_connect),
+        patch(
+            "nova.controller.loop._run_task_with_resources",
+            side_effect=RuntimeError("injected controller failure"),
+        ),pytest.raises(
+        RuntimeError,
+        match="injected controller failure",
+    )
+    ):
+        run_task("cleanup test", settings)
+
+    MockClient.return_value.close.assert_called_once_with()
+
+    with pytest.raises(
+        sqlite3.ProgrammingError,
+        match="closed database",
+    ):
+        captured["connection"].execute("SELECT 1")
+
+    audit = sqlite3.connect(settings.db)
+    try:
+        failed_run = audit.execute(
+            """
+            SELECT status, error_type, finished_at
+            FROM runs
+            """
+        ).fetchone()
+    finally:
+        audit.close()
+
+    assert failed_run is not None
+    assert failed_run[0:2] == ("failed", "RuntimeError")
+    assert failed_run[2] is not None
