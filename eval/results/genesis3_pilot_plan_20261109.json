@@ -1,0 +1,129 @@
+{
+  "protocol_id": "G3-PILOT-01",
+  "created_at": "2026-11-09T06:09:53.193208+00:00",
+  "randomization_seed": 20261109,
+  "planned_runs": 18,
+  "base_system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "request_settings": {
+    "temperature": 0.2,
+    "max_tokens": 2048,
+    "reasoning_effort": "none",
+    "max_steps": 8
+  },
+  "model": "qwen3.5:4b",
+  "environment": {
+    "ollama_version": "ollama version is 0.40.15",
+    "model_metadata": "Model\n    architecture        qwen35             \n    parameters          4.2B               \n    context length      262144             \n    embedding length    2560               \n    quantization        Q4_K_M             \n    requires            0.30.0             \n    renderer            qwen3.5            \n    parser              qwen3.5            \n    template source     renderer_parser    \n\n  Capabilities\n    completion     \n    vision         \n    tools          \n    thinking       \n        levels     false, true    \n        default    true           \n\n  Projector\n    architecture        clip       \n    parameters          333.51M    \n    embedding length    1024       \n    dimensions          2560       \n\n  Parameters\n    presence_penalty    1.5     \n    temperature         1       \n    top_k               20      \n    top_p               0.95    \n\n  License\n    Apache License               \n    Version 2.0, January 2004    \n    ..."
+  },
+  "conditions": [
+    {
+      "arm": "B",
+      "fault": "transient",
+      "seed": 2,
+      "run_order": 1
+    },
+    {
+      "arm": "C",
+      "fault": "persistent",
+      "seed": 1,
+      "run_order": 2
+    },
+    {
+      "arm": "C",
+      "fault": "transient",
+      "seed": 2,
+      "run_order": 3
+    },
+    {
+      "arm": "B",
+      "fault": "persistent",
+      "seed": 1,
+      "run_order": 4
+    },
+    {
+      "arm": "A",
+      "fault": "persistent",
+      "seed": 0,
+      "run_order": 5
+    },
+    {
+      "arm": "B",
+      "fault": "persistent",
+      "seed": 2,
+      "run_order": 6
+    },
+    {
+      "arm": "C",
+      "fault": "transient",
+      "seed": 1,
+      "run_order": 7
+    },
+    {
+      "arm": "B",
+      "fault": "transient",
+      "seed": 1,
+      "run_order": 8
+    },
+    {
+      "arm": "A",
+      "fault": "transient",
+      "seed": 0,
+      "run_order": 9
+    },
+    {
+      "arm": "A",
+      "fault": "transient",
+      "seed": 2,
+      "run_order": 10
+    },
+    {
+      "arm": "C",
+      "fault": "persistent",
+      "seed": 2,
+      "run_order": 11
+    },
+    {
+      "arm": "A",
+      "fault": "transient",
+      "seed": 1,
+      "run_order": 12
+    },
+    {
+      "arm": "C",
+      "fault": "transient",
+      "seed": 0,
+      "run_order": 13
+    },
+    {
+      "arm": "A",
+      "fault": "persistent",
+      "seed": 1,
+      "run_order": 14
+    },
+    {
+      "arm": "B",
+      "fault": "persistent",
+      "seed": 0,
+      "run_order": 15
+    },
+    {
+      "arm": "A",
+      "fault": "persistent",
+      "seed": 2,
+      "run_order": 16
+    },
+    {
+      "arm": "B",
+      "fault": "transient",
+      "seed": 0,
+      "run_order": 17
+    },
+    {
+      "arm": "C",
+      "fault": "persistent",
+      "seed": 0,
+      "run_order": 18
+    }
+  ],
+  "model_calls_made": 0
+}
