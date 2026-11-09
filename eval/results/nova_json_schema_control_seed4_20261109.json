@@ -1,0 +1,20 @@
+{
+  "task_id": "inventory_batch",
+  "arm": "V0_NOECHO_THINK_OFF",
+  "seed": 4,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 6.3,
+  "prompt_tokens": 1422,
+  "completion_tokens": 284,
+  "total_tokens": 1706,
+  "run_id": "d23d35cc-46f8-4a4d-b1fd-90edac05d4af",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "C:\\Users\\Shahid\\Downloads\\nova\\data\\prompts\\v0.txt",
+  "generation_mode": "unconstrained_think_off",
+  "reasoning_effort": "none",
+  "max_tokens": 2048,
+  "action_schema_sha256": null
+}

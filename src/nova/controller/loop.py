@@ -26,6 +26,31 @@ Rules:
 - Call done only when you believe the fix is complete.
 """
 
+
+NOVA_ACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "action": {
+            "type": "string",
+            "enum": ["write_file", "read_file", "list_files", "done"],
+        },
+        "path": {"type": "string"},
+        "content": {"type": "string"},
+        "subdir": {"type": "string"},
+        "summary": {"type": "string"},
+    },
+    "required": ["action"],
+    "additionalProperties": False,
+}
+
+NOVA_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "nova_action",
+        "schema": NOVA_ACTION_SCHEMA,
+    },
+}
+
 def _parse_action(text: str) -> dict:
     text = text.strip()
     if text.startswith("```"):
@@ -33,6 +58,41 @@ def _parse_action(text: str) -> dict:
         if text.lower().startswith("json"):
             text = text[4:]
     return json.loads(text)
+
+
+def _validate_action(action: object) -> dict:
+    if not isinstance(action, dict):
+        raise ValueError("Action must be a JSON object.")
+
+    kind = action.get("action")
+
+    rules = {
+        "write_file": ({"path", "content"}, set()),
+        "read_file": ({"path"}, set()),
+        "list_files": (set(), {"subdir"}),
+        "done": ({"summary"}, set()),
+    }
+
+    if not isinstance(kind, str) or kind not in rules:
+        raise ValueError(f"Unknown or missing action: {kind!r}")
+
+    required, optional = rules[kind]
+    allowed = {"action"} | required | optional
+
+    missing = required - set(action)
+    unexpected = set(action) - allowed
+
+    if missing:
+        raise ValueError(f"Missing required fields: {sorted(missing)}")
+    if unexpected:
+        raise ValueError(f"Unexpected fields: {sorted(unexpected)}")
+
+    for field in required | (optional & set(action)):
+        if not isinstance(action[field], str):
+            raise ValueError(f"Field {field!r} must be a string.")
+
+    return action
+
 
 def _dispatch(action: dict, settings: Settings) -> str:
     kind = action.get("action")
@@ -73,8 +133,32 @@ def run_task(
     total_ct = 0
     all_usage_complete = True
 
+    # Matched experimental conditions:
+    # V0_NOECHO_THINK_OFF: no schema, reasoning disabled.
+    # V0_JSON_SCHEMA: same settings, with JSON Schema enforcement.
+    reasoning_disabled = arm in {"V0_NOECHO_THINK_OFF", "V0_JSON_SCHEMA"}
+    structured_output = arm == "V0_JSON_SCHEMA"
+
+    schema_sha256 = (
+        hashlib.sha256(
+            json.dumps(NOVA_ACTION_SCHEMA, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        if structured_output else None
+    )
+
     for step in range(settings.max_steps):
-        raw, usage_info, status = client.chat_with_usage(messages, seed=seed)
+        call_options = {"seed": seed}
+
+        if reasoning_disabled:
+            call_options["reasoning_effort"] = "none"
+            call_options["max_tokens"] = 2048
+
+        if structured_output:
+            call_options["response_format"] = NOVA_RESPONSE_FORMAT
+
+        raw, usage_info, status = client.chat_with_usage(
+            messages, **call_options
+        )
         
         conn.execute(
             "INSERT INTO model_calls (id, run_id, purpose, model, prompt_tokens, completion_tokens, total_tokens, status, usage_complete, usage_json, created_at) "
@@ -99,14 +183,25 @@ def run_task(
         
         try:
             action = _parse_action(raw)
-        except json.JSONDecodeError as exc:
-            # Preserve the original retry behavior for this experiment.
-            # Do not feed malformed assistant output back into the model context.
-            messages.append({"role": "user", "content": "Your last message was not valid JSON. Reply with JSON only."})
+            if reasoning_disabled:
+                action = _validate_action(action)
+
+        except (json.JSONDecodeError, ValueError) as exc:
+            error_kind = (
+                "bad json"
+                if isinstance(exc, json.JSONDecodeError)
+                else "invalid action"
+            )
+
+            # Preserve no-echo behavior and original retry wording.
+            messages.append({
+                "role": "user",
+                "content": "Your last message was not valid JSON. Reply with JSON only.",
+            })
 
             transcript.append({
                 "step": step,
-                "error": "bad json",
+                "error": error_kind,
                 "raw": raw[:20000],
                 "raw_length": len(raw),
                 "raw_truncated": len(raw) > 20000,
@@ -166,5 +261,13 @@ def run_task(
         "prompt_tokens": pt_val,
         "completion_tokens": ct_val,
         "total_tokens": tt_val,
-        "usage_complete": all_usage_complete
+        "usage_complete": all_usage_complete,
+        "generation_mode": (
+            "json_schema" if structured_output
+            else "unconstrained_think_off" if reasoning_disabled
+            else "legacy"
+        ),
+        "reasoning_effort": "none" if reasoning_disabled else "server_default",
+        "max_tokens": 2048 if reasoning_disabled else None,
+        "action_schema_sha256": schema_sha256,
     }

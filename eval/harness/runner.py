@@ -212,6 +212,10 @@ def run_one(task_dir: Path, arm: str, seed: int) -> dict:
         "run_id": agent_result["run_id"],
         "system_prompt_sha256": system_prompt_sha256,
         "system_prompt_source": str(prompt_path) if prompt_path else "default",
+        "generation_mode": agent_result.get("generation_mode"),
+        "reasoning_effort": agent_result.get("reasoning_effort"),
+        "max_tokens": agent_result.get("max_tokens"),
+        "action_schema_sha256": agent_result.get("action_schema_sha256"),
     }
 
 
