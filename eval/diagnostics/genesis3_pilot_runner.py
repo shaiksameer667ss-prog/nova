@@ -182,7 +182,7 @@ def make_workspace():
 
     return workspace
 
-def execute_run(condition, settings):
+def execute_run(condition, settings, progress_callback=None):
     arm = condition["arm"]
     fault = condition["fault"]
     seed = condition["seed"]
@@ -221,6 +221,10 @@ def execute_run(condition, settings):
         "stop_reason": None,
         "trace": [],
     }
+
+    def save_progress():
+        if progress_callback is not None:
+            progress_callback(record)
 
     original_cwd = Path.cwd()
     start_time = time.monotonic()
@@ -274,6 +278,7 @@ def execute_run(condition, settings):
 
                     call_record = {
                         "step": step,
+                        "request_status": "started",
                         "request": {
                             "temperature": TEMPERATURE,
                             "max_tokens": MAX_TOKENS,
@@ -281,6 +286,8 @@ def execute_run(condition, settings):
                             "reasoning_effort": REASONING_EFFORT,
                         },
                     }
+                    record["trace"].append(call_record)
+                    save_progress()
 
                     try:
                         response = client.post(
@@ -293,13 +300,14 @@ def execute_run(condition, settings):
                         usage = data.get("usage")
 
                     except Exception as exc:
+                        call_record["request_status"] = "error"
                         call_record["api_error"] = (
                             f"{type(exc).__name__}: {exc}"
                         )
-                        record["trace"].append(call_record)
                         record["usage_complete"] = False
                         record["final_outcome"] = "model_error"
                         record["stop_reason"] = "api_error"
+                        save_progress()
                         break
 
                     required = (
@@ -323,17 +331,19 @@ def execute_run(condition, settings):
                             == usage["total_tokens"]
                         )
 
+                    call_record["request_status"] = "response_received"
                     call_record["usage"] = usage
                     call_record["raw_output"] = raw
                     call_record["finish_reason"] = choice.get(
                         "finish_reason"
                     )
-                    record["trace"].append(call_record)
+                    save_progress()
 
                     if not usage_valid:
                         record["usage_complete"] = False
                         record["final_outcome"] = "model_error"
                         record["stop_reason"] = "usage_incomplete"
+                        save_progress()
                         break
 
                     record["prompt_tokens"] += usage["prompt_tokens"]
@@ -341,6 +351,8 @@ def execute_run(condition, settings):
                         "completion_tokens"
                     ]
                     record["total_tokens"] += usage["total_tokens"]
+                    call_record["request_status"] = "usage_recorded"
+                    save_progress()
 
                     try:
                         action = parse_action(raw)
@@ -353,6 +365,7 @@ def execute_run(condition, settings):
                                 "Reply with JSON only."
                             ),
                         })
+                        save_progress()
                         continue
 
                     call_record["action"] = action
@@ -373,6 +386,7 @@ def execute_run(condition, settings):
                         else:
                             record["done_summary_classification"] = "unclassified"
                             record["final_outcome"] = "unclassified_done"
+                        save_progress()
                         break
 
                     record["tool_calls"] += 1
@@ -402,6 +416,7 @@ def execute_run(condition, settings):
                                 record["stop_reason"] = (
                                     "three_list_files_failures"
                                 )
+                                save_progress()
                                 break
 
                     elif kind == "write_file":
@@ -440,6 +455,8 @@ def execute_run(condition, settings):
                         "role": "user",
                         "content": f"Observation:\n{observation}",
                     })
+                    call_record["request_status"] = "step_complete"
+                    save_progress()
 
             manifest = workspace / "manifest.txt"
             record["manifest_written"] = manifest.is_file()
@@ -457,6 +474,7 @@ def execute_run(condition, settings):
 
         finally:
             os.chdir(original_cwd)
+            save_progress()
 
     record["wall_seconds"] = round(
         time.monotonic() - start_time, 2
@@ -520,8 +538,13 @@ def execute_pilot():
         "stop_reason": None,
         "environment": current_environment,
         "runs": [],
+        "active_run": None,
     }
     atomic_json(RESULT_PATH, results)
+
+    def checkpoint_active_run(partial_record):
+        results["active_run"] = partial_record
+        atomic_json(RESULT_PATH, results)
 
     no_tool_trace_streak = 0
 
@@ -533,9 +556,14 @@ def execute_pilot():
             flush=True,
         )
 
-        record = execute_run(condition, settings)
+        record = execute_run(
+            condition,
+            settings,
+            progress_callback=checkpoint_active_run,
+        )
         results["runs"].append(record)
         results["completed_runs"] += 1
+        results["active_run"] = None
 
         if record["tool_calls"] == 0:
             no_tool_trace_streak += 1
