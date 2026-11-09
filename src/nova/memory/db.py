@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS runs (
     memory_injected INTEGER DEFAULT 0, memory_type TEXT, memory_item_id TEXT,
     memory_source_run_id TEXT, memory_sha256 TEXT,
     prompt_tokens INTEGER, completion_tokens INTEGER, total_tokens INTEGER,
-    usage_complete INTEGER NOT NULL DEFAULT 0
+    usage_complete INTEGER NOT NULL DEFAULT 0,
+    termination_reason TEXT
 );
 
 CREATE TABLE IF NOT EXISTS model_calls (
@@ -49,7 +50,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
-    
+
     _ensure_column(conn, "episodes", "run_id", "TEXT")
     _ensure_column(conn, "skills", "source_run_id", "TEXT")
     _ensure_column(conn, "skills", "source_episode_id", "TEXT")
@@ -62,5 +63,6 @@ def connect(db_path: Path) -> sqlite3.Connection:
     _ensure_column(conn, "runs", "completion_tokens", "INTEGER")
     _ensure_column(conn, "runs", "total_tokens", "INTEGER")
     _ensure_column(conn, "runs", "usage_complete", "INTEGER NOT NULL DEFAULT 0")
-        
+    _ensure_column(conn, "runs", "termination_reason", "TEXT")
+
     return conn
