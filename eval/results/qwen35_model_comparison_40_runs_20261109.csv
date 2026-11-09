@@ -1,0 +1,41 @@
+﻿Model,Task,Seed,VerifiedSuccess,Steps,WallSeconds,PromptTokens,CompletionTokens,TotalTokens,ActionSequence,RunId
+qwen3.5:4b,hidden_auth,0,True,3,20.854599,1361,299,1660,read_file -> write_file -> done,8d469605-07a2-40db-b600-3646ce705c01
+qwen3.5:4b,hidden_auth,1,True,3,6.602772,1361,306,1667,read_file -> write_file -> done,2fb541e8-506a-4684-bc27-3e31660077dd
+qwen3.5:4b,hidden_auth,2,True,3,18.284976,1361,309,1670,read_file -> write_file -> done,3cbdc078-3ad6-4e57-a697-9988bdecba7a
+qwen3.5:4b,hidden_auth,3,True,3,18.258255,1361,306,1667,read_file -> write_file -> done,51a4b0fe-9328-4d91-9348-25a7cf5061ba
+qwen3.5:4b,hidden_auth,4,True,3,18.485274,1361,300,1661,read_file -> write_file -> done,4a5ff592-2d87-4830-9a0f-91742b85c462
+qwen3.5:4b,inventory_batch,0,True,3,17.367328,1411,274,1685,read_file -> write_file -> done,ccb82569-77ff-4099-be45-96d4544eeb74
+qwen3.5:4b,inventory_batch,1,True,3,6.276877,1412,274,1686,read_file -> write_file -> done,a9bd0a6a-b58d-419b-8a91-a504c62fdc4e
+qwen3.5:4b,inventory_batch,2,True,3,7.028981,1412,275,1687,read_file -> write_file -> done,cb4fa85f-930a-42ca-88d8-7b0a65bb2138
+qwen3.5:4b,inventory_batch,3,True,3,6.602327,1424,301,1725,read_file -> write_file -> done,1f584961-797f-4b9f-bf90-adf9127ec0a4
+qwen3.5:4b,inventory_batch,4,True,3,6.809536,1422,284,1706,read_file -> write_file -> done,99862af7-4a89-4c8f-8250-9fffc0734460
+qwen3.5:4b,scan_state,0,True,3,7.159231,1745,333,2078,read_file -> write_file -> done,370971ae-3ce3-4df8-a3a6-9f4955edc068
+qwen3.5:4b,scan_state,1,True,3,7.18928,1745,333,2078,read_file -> write_file -> done,e12352be-7b1b-406f-aa07-1077d6c8a3b4
+qwen3.5:4b,scan_state,2,True,3,7.409305,1745,333,2078,read_file -> write_file -> done,ce6400b4-7f78-4abf-82e3-3aa5e573aa21
+qwen3.5:4b,scan_state,3,True,3,7.092075,1745,333,2078,read_file -> write_file -> done,c4b36946-561b-4e96-a2ce-2bb4111a5c84
+qwen3.5:4b,scan_state,4,True,3,7.565702,1745,333,2078,read_file -> write_file -> done,e1463a89-6c02-49f3-81c4-4973c2f21af7
+qwen3.5:4b,task_001,0,True,3,4.681255,988,145,1133,read_file -> write_file -> done,086baae0-68a4-422f-af95-0695000c6ae9
+qwen3.5:4b,task_001,1,True,3,4.675863,988,145,1133,read_file -> write_file -> done,0d2ad5e6-8a86-42c3-b57c-b2777162a278
+qwen3.5:4b,task_001,2,True,3,4.981475,988,143,1131,read_file -> write_file -> done,71ac7293-89bc-4e0d-b307-8d4b462fccbd
+qwen3.5:4b,task_001,3,True,3,4.615048,988,145,1133,read_file -> write_file -> done,164b3b88-c0ff-4c75-bd70-826e30c06b88
+qwen3.5:4b,task_001,4,True,3,4.497014,988,145,1133,read_file -> write_file -> done,3501b569-7b71-4cf5-9c92-39a9d53f62de
+qwen3.5:9b,hidden_auth,0,False,2,8.016059,671,268,939,read_file -> done,6168368e-6f46-434d-8e01-f8a14ee2ac56
+qwen3.5:9b,hidden_auth,1,False,2,20.374703,671,110,781,read_file -> done,503715e5-2e25-4014-bbf8-07a8c156822e
+qwen3.5:9b,hidden_auth,2,False,2,20.216725,671,118,789,read_file -> done,ab1f72a6-c44d-46ee-9c23-e5bf4945d595
+qwen3.5:9b,hidden_auth,3,False,2,21.283248,671,117,788,read_file -> done,918019ae-51ff-4459-ae24-6b7c390539e8
+qwen3.5:9b,hidden_auth,4,False,2,20.597531,671,135,806,read_file -> done,de6f9778-7e69-4af7-ad8f-3726e324d4d7
+qwen3.5:9b,inventory_batch,0,True,3,8.536284,1411,277,1688,read_file -> write_file -> done,94ecbe35-9deb-487d-b1e1-8535dc587bcb
+qwen3.5:9b,inventory_batch,1,True,3,24.584211,1400,264,1664,read_file -> write_file -> done,8d0b140a-7c9f-44ae-8e70-ef076e86b1d1
+qwen3.5:9b,inventory_batch,2,True,3,8.548071,1411,276,1687,read_file -> write_file -> done,ab68859a-9fd9-4300-aa96-5528639ad9fc
+qwen3.5:9b,inventory_batch,3,True,3,8.335054,1400,265,1665,read_file -> write_file -> done,e97715fc-5da9-4a8e-b11a-5794b8d81284
+qwen3.5:9b,inventory_batch,4,True,3,8.638127,1411,277,1688,read_file -> write_file -> done,c311b216-fcfc-4edf-b8f0-a015cf64a237
+qwen3.5:9b,scan_state,0,True,3,9.319441,1744,319,2063,read_file -> write_file -> done,ed629dfe-2de1-4ce9-b969-29359a0ea93b
+qwen3.5:9b,scan_state,1,True,3,9.773726,1733,309,2042,read_file -> write_file -> done,db678098-9723-4d12-965a-1bd03c90f628
+qwen3.5:9b,scan_state,2,True,3,9.853893,1744,320,2064,read_file -> write_file -> done,9cd0a857-504a-45f5-a475-65f3b7bf60e9
+qwen3.5:9b,scan_state,3,True,3,9.44902,1733,308,2041,read_file -> write_file -> done,98d2eb46-a447-442d-ada3-c9af773f9161
+qwen3.5:9b,scan_state,4,True,3,10.371815,1744,319,2063,read_file -> write_file -> done,fb20649a-a9e9-4fc3-9b35-c317df3bcce7
+qwen3.5:9b,task_001,0,True,3,5.525491,979,135,1114,read_file -> write_file -> done,ab2de97c-3aae-4fb6-be4d-5722f5fca681
+qwen3.5:9b,task_001,1,True,3,7.252431,979,135,1114,read_file -> write_file -> done,b5dddb17-699c-438e-a4a0-25cc587036f5
+qwen3.5:9b,task_001,2,True,3,5.626209,979,135,1114,read_file -> write_file -> done,0295f293-7291-4565-b2f0-280b127a6788
+qwen3.5:9b,task_001,3,True,3,5.533292,979,135,1114,read_file -> write_file -> done,75ca8c07-e8ba-432a-bce8-13bb8fce5471
+qwen3.5:9b,task_001,4,True,3,5.631665,979,135,1114,read_file -> write_file -> done,e0eb38b5-da09-4958-8795-d95995aea083

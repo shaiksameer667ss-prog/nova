@@ -1,0 +1,456 @@
+
+===== qwen3.5:4b | inventory_batch | seed 1 =====
+{
+  "task_id": "inventory_batch",
+  "arm": "A",
+  "seed": 1,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 6.3,
+  "prompt_tokens": 1412,
+  "completion_tokens": 274,
+  "total_tokens": 1686,
+  "run_id": "a9bd0a6a-b58d-419b-8a91-a504c62fdc4e",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:4b | inventory_batch | seed 2 =====
+{
+  "task_id": "inventory_batch",
+  "arm": "A",
+  "seed": 2,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 7.0,
+  "prompt_tokens": 1412,
+  "completion_tokens": 275,
+  "total_tokens": 1687,
+  "run_id": "cb4fa85f-930a-42ca-88d8-7b0a65bb2138",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:4b | inventory_batch | seed 3 =====
+{
+  "task_id": "inventory_batch",
+  "arm": "A",
+  "seed": 3,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 6.6,
+  "prompt_tokens": 1424,
+  "completion_tokens": 301,
+  "total_tokens": 1725,
+  "run_id": "1f584961-797f-4b9f-bf90-adf9127ec0a4",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:4b | inventory_batch | seed 4 =====
+{
+  "task_id": "inventory_batch",
+  "arm": "A",
+  "seed": 4,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 6.8,
+  "prompt_tokens": 1422,
+  "completion_tokens": 284,
+  "total_tokens": 1706,
+  "run_id": "99862af7-4a89-4c8f-8250-9fffc0734460",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:4b | scan_state | seed 1 =====
+{
+  "task_id": "scan_state",
+  "arm": "A",
+  "seed": 1,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 7.2,
+  "prompt_tokens": 1745,
+  "completion_tokens": 333,
+  "total_tokens": 2078,
+  "run_id": "e12352be-7b1b-406f-aa07-1077d6c8a3b4",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:4b | scan_state | seed 2 =====
+{
+  "task_id": "scan_state",
+  "arm": "A",
+  "seed": 2,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 7.4,
+  "prompt_tokens": 1745,
+  "completion_tokens": 333,
+  "total_tokens": 2078,
+  "run_id": "ce6400b4-7f78-4abf-82e3-3aa5e573aa21",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:4b | scan_state | seed 3 =====
+{
+  "task_id": "scan_state",
+  "arm": "A",
+  "seed": 3,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 7.1,
+  "prompt_tokens": 1745,
+  "completion_tokens": 333,
+  "total_tokens": 2078,
+  "run_id": "c4b36946-561b-4e96-a2ce-2bb4111a5c84",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:4b | scan_state | seed 4 =====
+{
+  "task_id": "scan_state",
+  "arm": "A",
+  "seed": 4,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 7.6,
+  "prompt_tokens": 1745,
+  "completion_tokens": 333,
+  "total_tokens": 2078,
+  "run_id": "e1463a89-6c02-49f3-81c4-4973c2f21af7",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:4b | task_001 | seed 1 =====
+{
+  "task_id": "task_001",
+  "arm": "A",
+  "seed": 1,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 4.7,
+  "prompt_tokens": 988,
+  "completion_tokens": 145,
+  "total_tokens": 1133,
+  "run_id": "0d2ad5e6-8a86-42c3-b57c-b2777162a278",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:4b | task_001 | seed 2 =====
+{
+  "task_id": "task_001",
+  "arm": "A",
+  "seed": 2,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 5.0,
+  "prompt_tokens": 988,
+  "completion_tokens": 143,
+  "total_tokens": 1131,
+  "run_id": "71ac7293-89bc-4e0d-b307-8d4b462fccbd",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:4b | task_001 | seed 3 =====
+{
+  "task_id": "task_001",
+  "arm": "A",
+  "seed": 3,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 4.6,
+  "prompt_tokens": 988,
+  "completion_tokens": 145,
+  "total_tokens": 1133,
+  "run_id": "164b3b88-c0ff-4c75-bd70-826e30c06b88",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:4b | task_001 | seed 4 =====
+{
+  "task_id": "task_001",
+  "arm": "A",
+  "seed": 4,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 4.5,
+  "prompt_tokens": 988,
+  "completion_tokens": 145,
+  "total_tokens": 1133,
+  "run_id": "3501b569-7b71-4cf5-9c92-39a9d53f62de",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:9b | inventory_batch | seed 1 =====
+{
+  "task_id": "inventory_batch",
+  "arm": "A",
+  "seed": 1,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 24.6,
+  "prompt_tokens": 1400,
+  "completion_tokens": 264,
+  "total_tokens": 1664,
+  "run_id": "8d0b140a-7c9f-44ae-8e70-ef076e86b1d1",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:9b | inventory_batch | seed 2 =====
+{
+  "task_id": "inventory_batch",
+  "arm": "A",
+  "seed": 2,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 8.5,
+  "prompt_tokens": 1411,
+  "completion_tokens": 276,
+  "total_tokens": 1687,
+  "run_id": "ab68859a-9fd9-4300-aa96-5528639ad9fc",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:9b | inventory_batch | seed 3 =====
+{
+  "task_id": "inventory_batch",
+  "arm": "A",
+  "seed": 3,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 8.3,
+  "prompt_tokens": 1400,
+  "completion_tokens": 265,
+  "total_tokens": 1665,
+  "run_id": "e97715fc-5da9-4a8e-b11a-5794b8d81284",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:9b | inventory_batch | seed 4 =====
+{
+  "task_id": "inventory_batch",
+  "arm": "A",
+  "seed": 4,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 8.6,
+  "prompt_tokens": 1411,
+  "completion_tokens": 277,
+  "total_tokens": 1688,
+  "run_id": "c311b216-fcfc-4edf-b8f0-a015cf64a237",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:9b | scan_state | seed 1 =====
+{
+  "task_id": "scan_state",
+  "arm": "A",
+  "seed": 1,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 9.8,
+  "prompt_tokens": 1733,
+  "completion_tokens": 309,
+  "total_tokens": 2042,
+  "run_id": "db678098-9723-4d12-965a-1bd03c90f628",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:9b | scan_state | seed 2 =====
+{
+  "task_id": "scan_state",
+  "arm": "A",
+  "seed": 2,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 9.9,
+  "prompt_tokens": 1744,
+  "completion_tokens": 320,
+  "total_tokens": 2064,
+  "run_id": "9cd0a857-504a-45f5-a475-65f3b7bf60e9",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:9b | scan_state | seed 3 =====
+{
+  "task_id": "scan_state",
+  "arm": "A",
+  "seed": 3,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 9.4,
+  "prompt_tokens": 1733,
+  "completion_tokens": 308,
+  "total_tokens": 2041,
+  "run_id": "98d2eb46-a447-442d-ada3-c9af773f9161",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:9b | scan_state | seed 4 =====
+{
+  "task_id": "scan_state",
+  "arm": "A",
+  "seed": 4,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 10.4,
+  "prompt_tokens": 1744,
+  "completion_tokens": 319,
+  "total_tokens": 2063,
+  "run_id": "fb20649a-a9e9-4fc3-9b35-c317df3bcce7",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:9b | task_001 | seed 1 =====
+{
+  "task_id": "task_001",
+  "arm": "A",
+  "seed": 1,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 7.3,
+  "prompt_tokens": 979,
+  "completion_tokens": 135,
+  "total_tokens": 1114,
+  "run_id": "b5dddb17-699c-438e-a4a0-25cc587036f5",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:9b | task_001 | seed 2 =====
+{
+  "task_id": "task_001",
+  "arm": "A",
+  "seed": 2,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 5.6,
+  "prompt_tokens": 979,
+  "completion_tokens": 135,
+  "total_tokens": 1114,
+  "run_id": "0295f293-7291-4565-b2f0-280b127a6788",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:9b | task_001 | seed 3 =====
+{
+  "task_id": "task_001",
+  "arm": "A",
+  "seed": 3,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 5.5,
+  "prompt_tokens": 979,
+  "completion_tokens": 135,
+  "total_tokens": 1114,
+  "run_id": "75ca8c07-e8ba-432a-bce8-13bb8fce5471",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
+
+===== qwen3.5:9b | task_001 | seed 4 =====
+{
+  "task_id": "task_001",
+  "arm": "A",
+  "seed": 4,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 5.6,
+  "prompt_tokens": 979,
+  "completion_tokens": 135,
+  "total_tokens": 1114,
+  "run_id": "e0eb38b5-da09-4958-8795-d95995aea083",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default"
+}
+Exit code: 0
