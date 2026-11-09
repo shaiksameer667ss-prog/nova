@@ -1,5 +1,6 @@
 import hashlib
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -20,6 +21,9 @@ from nova.memory.db import (
     start_action_execution,
 )
 from nova.tools.file_ops import list_files, read_file, write_file
+
+MAX_COMPLETION_VERIFICATION_ATTEMPTS = 2
+
 
 SYSTEM_PROMPT = """You are NOVA, an autonomous coding agent. You solve tasks by
 proposing ONE action at a time, in JSON, and the system executes it.
@@ -103,6 +107,7 @@ def _run_task_locked(
     benchmark_task_id: str | None = None,
     system_prompt: str | None = None,
     use_json_schema: bool = True,
+    completion_verifier: Callable[[], bool] | None = None,
 ) -> dict:
     settings.workspace.mkdir(parents=True, exist_ok=True)
 
@@ -139,6 +144,7 @@ def _run_task_locked(
                     benchmark_task_id=benchmark_task_id,
                     system_prompt=system_prompt,
                     use_json_schema=use_json_schema,
+                    completion_verifier=completion_verifier,
                     client=client,
                     conn=conn,
                     run_id=run_id,
@@ -163,6 +169,7 @@ def _run_task_with_resources(
     benchmark_task_id: str | None = None,
     system_prompt: str | None = None,
     use_json_schema: bool = True,
+    completion_verifier: Callable[[], bool] | None = None,
     *,
     client: ModelClient,
     conn,
@@ -190,6 +197,9 @@ def _run_task_with_resources(
     failure_tracker = FailureTracker(threshold=LOOP_GUARD_THRESHOLD)
     loop_detected = False
     model_error = False
+    completion_verification_failed = False
+    completion_verifier_error = False
+    completion_verification_attempts = 0
 
     for step in range(settings.max_steps):
         if use_json_schema:
@@ -288,18 +298,72 @@ def _run_task_with_resources(
         transcript[-1]["execution_id"] = execution_id
 
         if action_kind == "done":
-            final_summary = action["summary"]
-            summary_bytes = final_summary.encode("utf-8")
+            try:
+                verification_passed = (
+                    completion_verifier is None
+                    or completion_verifier() is True
+                )
+            except Exception:  # noqa: BLE001 - fail closed on verifier errors
+                finish_action_execution(
+                    conn,
+                    execution_id,
+                    status="failed",
+                    error_type="CompletionVerifierError",
+                )
+                transcript[-1]["execution_status"] = "failed"
+                transcript[-1]["error_type"] = "CompletionVerifierError"
+                transcript[-1]["observation"] = "Completion verifier error."
+                completion_verifier_error = True
+                break
+
+            if verification_passed:
+                final_summary = action["summary"]
+                summary_bytes = final_summary.encode("utf-8")
+                finish_action_execution(
+                    conn,
+                    execution_id,
+                    status="succeeded",
+                    result_sha256=hashlib.sha256(summary_bytes).hexdigest(),
+                    result_length=len(summary_bytes),
+                )
+                transcript[-1]["execution_status"] = "succeeded"
+                agent_success = True
+                break
+
+            completion_verification_attempts += 1
             finish_action_execution(
                 conn,
                 execution_id,
-                status="succeeded",
-                result_sha256=hashlib.sha256(summary_bytes).hexdigest(),
-                result_length=len(summary_bytes),
+                status="failed",
+                error_type="CompletionVerificationFailed",
             )
-            transcript[-1]["execution_status"] = "succeeded"
-            agent_success = True
-            break
+            transcript[-1]["execution_status"] = "failed"
+            transcript[-1]["error_type"] = "CompletionVerificationFailed"
+            transcript[-1]["verification_attempt"] = (
+                completion_verification_attempts
+            )
+
+            transcript[-1]["observation"] = "Completion verification failed."
+
+            if (
+                completion_verification_attempts
+                >= MAX_COMPLETION_VERIFICATION_ATTEMPTS
+            ):
+                completion_verification_failed = True
+                break
+
+            # Preserve conversation context but never expose verifier output.
+            messages.append({"role": "assistant", "content": raw})
+            messages.append({
+                "role": "user",
+                "content": (
+                    "Completion verification failed. The task is not yet "
+                    "verified. Re-examine the task requirements and workspace, "
+                    "make any necessary corrections, then try again. Do not "
+                    "claim completion until independent verification passes."
+                ),
+            })
+            continue
 
         try:
             observation = _dispatch(action, settings)
@@ -371,6 +435,10 @@ def _run_task_with_resources(
         stop_reason = "loop_detected"
     elif model_error:
         stop_reason = "model_error"
+    elif completion_verifier_error:
+        stop_reason = "completion_verifier_error"
+    elif completion_verification_failed:
+        stop_reason = "completion_verification_failed"
     elif agent_success:
         stop_reason = "completed"
     else:
@@ -425,6 +493,7 @@ def run_task(
     benchmark_task_id: str | None = None,
     system_prompt: str | None = None,
     use_json_schema: bool = True,
+    completion_verifier: Callable[[], bool] | None = None,
 ) -> dict:
     """Run NOVA under an exclusive database lock and recover old journal entries."""
     lock_path = settings.db.resolve().with_name(
@@ -440,4 +509,5 @@ def run_task(
             benchmark_task_id=benchmark_task_id,
             system_prompt=system_prompt,
             use_json_schema=use_json_schema,
+            completion_verifier=completion_verifier,
         )

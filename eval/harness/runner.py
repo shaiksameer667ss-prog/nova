@@ -1,10 +1,11 @@
+import argparse
+import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
-import hashlib
-import os
 from pathlib import Path
 
 import yaml
@@ -113,6 +114,7 @@ def _run_hidden_tests(workspace: Path, hidden_dir: Path) -> tuple[bool, str]:
 
         result = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "--no-header"],
+            check=False,
             cwd=str(tmp_path), 
             capture_output=True, 
             text=True, 
@@ -121,7 +123,12 @@ def _run_hidden_tests(workspace: Path, hidden_dir: Path) -> tuple[bool, str]:
         return result.returncode == 0, (result.stdout + result.stderr).strip()
 
 
-def run_one(task_dir: Path, arm: str, seed: int) -> dict:
+def run_one(
+    task_dir: Path,
+    arm: str,
+    seed: int,
+    completion_verification: bool = False,
+) -> dict:
     settings = get_settings()
     task = _load_task(task_dir)
     conn = connect(settings.db)
@@ -166,6 +173,17 @@ def run_one(task_dir: Path, arm: str, seed: int) -> dict:
         effective_system_prompt.encode("utf-8")
     ).hexdigest()
 
+    # Treatment verifier returns only a Boolean; test output stays private.
+    def verify_completion() -> bool:
+        passed, _ = _run_hidden_tests(
+            workspace, task_dir / "hidden_tests"
+        )
+        return passed
+
+    completion_verifier = (
+        verify_completion if completion_verification else None
+    )
+
     # 4. Run agent.
     agent_result = run_task(
         prompt,
@@ -174,10 +192,11 @@ def run_one(task_dir: Path, arm: str, seed: int) -> dict:
         seed=seed,
         benchmark_task_id=task["id"],
         system_prompt=system_prompt,
+        completion_verifier=completion_verifier,
     )
     
     # 4. Independent verification
-    verified_success, test_output = _run_hidden_tests(workspace, task_dir / "hidden_tests")
+    verified_success, _test_output = _run_hidden_tests(workspace, task_dir / "hidden_tests")
 
     # 5. Record results and provenance in DB
     conn.execute(
@@ -212,15 +231,26 @@ def run_one(task_dir: Path, arm: str, seed: int) -> dict:
         "run_id": agent_result["run_id"],
         "system_prompt_sha256": system_prompt_sha256,
         "system_prompt_source": str(prompt_path) if prompt_path else "default",
+        "completion_verification": completion_verification,
     }
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("usage: python -m eval.harness.runner <task_dir> [arm] [seed]")
-        sys.exit(2)
-    task_dir = Path(sys.argv[1])
-    arm = sys.argv[2] if len(sys.argv) > 2 else "A"
-    seed = int(sys.argv[3]) if len(sys.argv) > 3 else 0
-    result = run_one(task_dir, arm, seed)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("task_dir", type=Path)
+    parser.add_argument("arm", nargs="?", default="A")
+    parser.add_argument("seed", nargs="?", type=int, default=0)
+    parser.add_argument(
+        "--completion-verification",
+        action="store_true",
+        help="Verify proposed completion and allow one repair opportunity.",
+    )
+    args = parser.parse_args()
+
+    result = run_one(
+        args.task_dir,
+        args.arm,
+        args.seed,
+        completion_verification=args.completion_verification,
+    )
     print(json.dumps(result, indent=2))
