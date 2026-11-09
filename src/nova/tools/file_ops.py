@@ -1,3 +1,5 @@
+import os
+import tempfile
 from pathlib import Path
 
 
@@ -16,9 +18,48 @@ def _safe_path(workspace: Path, rel: str) -> Path:
 
 
 def write_file(workspace: Path, path: str, content: str) -> str:
+    """Write atomically and avoid rewriting identical file contents."""
+    if not isinstance(content, str):
+        raise TypeError("content must be a string.")
+
     target = _safe_path(workspace, path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    content_bytes = content.encode("utf-8")
+
+    # Idempotency: identical content requires no filesystem mutation.
+    if target.is_file() and target.read_bytes() == content_bytes:
+        return f"unchanged {len(content)} chars at {path}"
+
+    # Create the temporary file in the destination directory so os.replace
+    # stays on the same filesystem.
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{target.name}.",
+        suffix=".nova-tmp",
+        dir=str(target.parent),
+    )
+    temp_path = Path(temp_name)
+
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            fd = -1
+            stream.write(content_bytes)
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        # Readers see either the old file or the complete new file.
+        os.replace(temp_path, target)
+
+    except BaseException:
+        if fd != -1:
+            os.close(fd)
+
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+
+        raise
+
     return f"wrote {len(content)} chars to {path}"
 
 

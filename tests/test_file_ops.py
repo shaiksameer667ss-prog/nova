@@ -1,4 +1,5 @@
 from pathlib import Path
+
 import pytest
 
 from nova.tools.file_ops import (
@@ -57,3 +58,82 @@ def test_list_files_relative_path(tmp_path):
         assert "test.py" in result
     finally:
         os.chdir(old_cwd)
+def test_identical_write_does_not_replace_file(tmp_path, monkeypatch):
+    from nova.tools import file_ops
+
+    write_file(tmp_path, "a.txt", "original")
+    target = tmp_path / "a.txt"
+    original_mtime = target.stat().st_mtime_ns
+
+    def unexpected_replace(*args, **kwargs):
+        raise AssertionError("Identical writes must not replace the file.")
+
+    monkeypatch.setattr(file_ops.os, "replace", unexpected_replace)
+
+    result = write_file(tmp_path, "a.txt", "original")
+
+    assert result.startswith("unchanged")
+    assert target.read_text(encoding="utf-8") == "original"
+    assert target.stat().st_mtime_ns == original_mtime
+
+
+def test_different_content_replaces_existing_file(tmp_path):
+    write_file(tmp_path, "a.txt", "old")
+    result = write_file(tmp_path, "a.txt", "new")
+
+    assert result.startswith("wrote")
+    assert read_file(tmp_path, "a.txt") == "new"
+
+
+def test_atomic_replace_uses_destination_directory(tmp_path, monkeypatch):
+    from nova.tools import file_ops
+
+    original_replace = file_ops.os.replace
+    observed = {}
+
+    def checked_replace(source, destination):
+        source_path = Path(source)
+        destination_path = Path(destination)
+
+        observed["source_parent"] = source_path.parent.resolve()
+        observed["destination_parent"] = destination_path.parent.resolve()
+
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(file_ops.os, "replace", checked_replace)
+
+    write_file(tmp_path, "sub/a.txt", "content")
+
+    assert observed["source_parent"] == observed["destination_parent"]
+    assert read_file(tmp_path, "sub/a.txt") == "content"
+
+
+def test_failed_replace_preserves_original_and_cleans_temp(
+    tmp_path, monkeypatch
+):
+    from nova.tools import file_ops
+
+    write_file(tmp_path, "a.txt", "original")
+
+    def failed_replace(source, destination):
+        raise OSError("simulated replacement failure")
+
+    monkeypatch.setattr(file_ops.os, "replace", failed_replace)
+
+    with pytest.raises(OSError, match="simulated replacement failure"):
+        write_file(tmp_path, "a.txt", "replacement")
+
+    assert read_file(tmp_path, "a.txt") == "original"
+    assert list(tmp_path.glob(".a.txt.*.nova-tmp")) == []
+
+
+def test_empty_file_can_be_written_atomically(tmp_path):
+    result = write_file(tmp_path, "empty.txt", "")
+
+    assert result.startswith("wrote")
+    assert read_file(tmp_path, "empty.txt") == ""
+
+
+def test_non_string_content_is_rejected(tmp_path):
+    with pytest.raises(TypeError, match="content must be a string"):
+        write_file(tmp_path, "a.txt", 123)

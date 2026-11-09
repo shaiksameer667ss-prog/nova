@@ -1,11 +1,24 @@
-import json
 import hashlib
-from datetime import datetime, timezone
+import json
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from nova.client import ModelClient
 from nova.config import Settings
-from nova.memory.db import connect
+from nova.controller.contracts import ACTION_CONTRACTS, validate_action
+from nova.controller.reliability import FailureTracker
+from nova.controller.runtime_lock import RuntimeLock
+from nova.memory.db import (
+    connect,
+    create_action_execution,
+    create_run,
+    fail_run,
+    finish_action_execution,
+    finish_run,
+    recover_interrupted_actions,
+    recover_interrupted_runs,
+    start_action_execution,
+)
 from nova.tools.file_ops import list_files, read_file, write_file
 
 SYSTEM_PROMPT = """You are NOVA, an autonomous coding agent. You solve tasks by
@@ -67,37 +80,8 @@ def _parse_action(text: str) -> dict:
 
 
 def _validate_action(action: object) -> dict:
-    """Validate action-specific requirements after JSON parsing."""
-    if not isinstance(action, dict):
-        raise ValueError("Action must be a JSON object.")
-
-    kind = action.get("action")
-    rules = {
-        "write_file": ({"path", "content"}, set()),
-        "read_file": ({"path"}, set()),
-        "list_files": (set(), {"subdir"}),
-        "done": ({"summary"}, set()),
-    }
-
-    if not isinstance(kind, str) or kind not in rules:
-        raise ValueError(f"Unknown or missing action: {kind!r}")
-
-    required, optional = rules[kind]
-    allowed = {"action"} | required | optional
-
-    missing = required - set(action)
-    unexpected = set(action) - allowed
-
-    if missing:
-        raise ValueError(f"Missing required fields: {sorted(missing)}")
-    if unexpected:
-        raise ValueError(f"Unexpected fields: {sorted(unexpected)}")
-
-    for field in required | (optional & set(action)):
-        if not isinstance(action[field], str):
-            raise ValueError(f"Field {field!r} must be a string.")
-
-    return action
+    """Validate an action using the shared declarative action contracts."""
+    return validate_action(action)
 
 
 def _dispatch(action: dict, settings: Settings) -> str:
@@ -111,7 +95,7 @@ def _dispatch(action: dict, settings: Settings) -> str:
     raise ValueError(f"unknown action: {kind}")
 
 
-def run_task(
+def _run_task_locked(
     task: str,
     settings: Settings,
     arm: str = "A",
@@ -121,12 +105,73 @@ def run_task(
     use_json_schema: bool = True,
 ) -> dict:
     settings.workspace.mkdir(parents=True, exist_ok=True)
-    client = ModelClient(settings)
-    conn = connect(settings.db)
 
-    run_id = str(uuid4())
-    task_id = benchmark_task_id if benchmark_task_id else f"adhoc_{run_id[:8]}"
-    started = datetime.now(timezone.utc)
+    client = ModelClient(settings)
+    try:
+        conn = connect(settings.db)
+        try:
+            # Recover previous runs and actions under the exclusive runtime lock.
+            recovered_runs = recover_interrupted_runs(conn)
+            run_id = str(uuid4())
+            task_id = (
+                benchmark_task_id
+                if benchmark_task_id
+                else f"adhoc_{run_id[:8]}"
+            )
+            recovered_actions = recover_interrupted_actions(conn, run_id)
+
+            # Persist the run identity before the first model call.
+            create_run(
+                conn,
+                run_id=run_id,
+                task_id=task_id,
+                arm=arm,
+                seed=seed,
+                model=settings.model,
+            )
+
+            try:
+                return _run_task_with_resources(
+                    task=task,
+                    settings=settings,
+                    arm=arm,
+                    seed=seed,
+                    benchmark_task_id=benchmark_task_id,
+                    system_prompt=system_prompt,
+                    use_json_schema=use_json_schema,
+                    client=client,
+                    conn=conn,
+                    run_id=run_id,
+                    task_id=task_id,
+                    recovered_actions=recovered_actions,
+                    recovered_runs=recovered_runs,
+                )
+            except Exception as exc:
+                fail_run(conn, run_id, error_type=type(exc).__name__)
+                raise
+        finally:
+            conn.close()
+    finally:
+        client.close()
+
+
+def _run_task_with_resources(
+    task: str,
+    settings: Settings,
+    arm: str = "A",
+    seed: int = 0,
+    benchmark_task_id: str | None = None,
+    system_prompt: str | None = None,
+    use_json_schema: bool = True,
+    *,
+    client: ModelClient,
+    conn,
+    run_id: str,
+    task_id: str,
+    recovered_actions: dict[str, int],
+    recovered_runs: int,
+) -> dict:
+    started = datetime.now(UTC)
 
     messages = [
         {"role": "system", "content": system_prompt if system_prompt is not None else SYSTEM_PROMPT},
@@ -141,8 +186,8 @@ def run_task(
     total_ct = 0
     all_usage_complete = True
 
-    # Finding 7: controller guard state.
-    consecutive_tool_failures = 0
+    # Generalized repeated-failure detection for this run.
+    failure_tracker = FailureTracker(threshold=LOOP_GUARD_THRESHOLD)
     loop_detected = False
     model_error = False
 
@@ -164,7 +209,7 @@ def run_task(
             (str(uuid4()), run_id, "agent_step", settings.model,
              usage_info["prompt_tokens"], usage_info["completion_tokens"], usage_info["total_tokens"],
              status, int(usage_info["usage_complete"]), usage_info["usage_json"],
-             datetime.now(timezone.utc).isoformat())
+             datetime.now(UTC).isoformat())
         )
         conn.commit()
 
@@ -204,30 +249,122 @@ def run_task(
 
         transcript.append({"step": step, "assistant_output": raw, "action": action})
 
-        if action.get("action") == "done":
+        action_kind = action["action"]
+        contract = ACTION_CONTRACTS[action_kind]
+
+        # Hash the canonical action payload; do not copy its values into the journal.
+        request_bytes = json.dumps(
+            action,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        request_sha256 = hashlib.sha256(request_bytes).hexdigest()
+
+        # Store field names only. File paths, file contents and summaries stay out
+        # of the journal's human-readable request_summary.
+        request_fields = ",".join(
+            sorted(field for field in action if field != "action")
+        )
+        request_summary = f"{action_kind}(fields={request_fields})"
+
+        execution_id = str(uuid4())
+        idempotency_key = f"{run_id}:{step}"
+
+        # Both journal commits happen before the tool is invoked.
+        create_action_execution(
+            conn,
+            execution_id=execution_id,
+            run_id=run_id,
+            step=step,
+            action_name=action_kind,
+            effect=contract.effect,
+            idempotency_key=idempotency_key,
+            request_summary=request_summary,
+            request_sha256=request_sha256,
+        )
+        start_action_execution(conn, execution_id)
+
+        transcript[-1]["execution_id"] = execution_id
+
+        if action_kind == "done":
+            final_summary = action["summary"]
+            summary_bytes = final_summary.encode("utf-8")
+            finish_action_execution(
+                conn,
+                execution_id,
+                status="succeeded",
+                result_sha256=hashlib.sha256(summary_bytes).hexdigest(),
+                result_length=len(summary_bytes),
+            )
+            transcript[-1]["execution_status"] = "succeeded"
             agent_success = True
-            final_summary = action.get("summary", "")
             break
 
         try:
             observation = _dispatch(action, settings)
-            if action.get("action") == LOOP_GUARD_TOOL:
-                consecutive_tool_failures = 0
-        except Exception as e:
+
+        except Exception as e:  # noqa: BLE001 - journal and contain arbitrary tool failures
             observation = f"ERROR: {type(e).__name__}: {e}"
-            if action.get("action") == LOOP_GUARD_TOOL:
-                consecutive_tool_failures += 1
-                if consecutive_tool_failures >= LOOP_GUARD_THRESHOLD:
-                    transcript[-1]["observation"] = observation
-                    transcript[-1]["guard_triggered"] = True
-                    loop_detected = True
-                    break
+
+            failure_decision = failure_tracker.record_failure(
+                action_kind,
+                type(e).__name__,
+                str(e),
+            )
+
+            # A failed write may have partially changed the filesystem.
+            # Retain uncertain status until recovery explicitly resolves it.
+            execution_status = (
+                "uncertain" if contract.effect == "write" else "failed"
+            )
+
+            finish_action_execution(
+                conn,
+                execution_id,
+                status=execution_status,
+                error_type=type(e).__name__,
+                error_fingerprint=failure_decision.fingerprint,
+            )
+
+            transcript[-1]["execution_status"] = execution_status
+            transcript[-1]["failure_fingerprint"] = (
+                failure_decision.fingerprint
+            )
+            transcript[-1]["failure_occurrence_count"] = (
+                failure_decision.occurrence_count
+            )
+
+            if failure_decision.should_stop:
+                transcript[-1]["guard_triggered"] = True
+                transcript[-1]["guard_reason"] = (
+                    "repeated_failure_fingerprint"
+                )
+                loop_detected = True
+
+        else:
+            # A successful retry clears this tool's contribution to the
+            # repeated-failure count.
+            failure_tracker.record_success(action_kind)
+
+            result_bytes = observation.encode("utf-8")
+            finish_action_execution(
+                conn,
+                execution_id,
+                status="succeeded",
+                result_sha256=hashlib.sha256(result_bytes).hexdigest(),
+                result_length=len(result_bytes),
+            )
+            transcript[-1]["execution_status"] = "succeeded"
 
         transcript[-1]["observation"] = observation
+        if loop_detected:
+            break
+
         messages.append({"role": "assistant", "content": raw})
         messages.append({"role": "user", "content": f"Observation:\n{observation}"})
 
-    finished = datetime.now(timezone.utc)
+    finished = datetime.now(UTC)
     wall = (finished - started).total_seconds()
 
     if loop_detected:
@@ -244,21 +381,23 @@ def run_task(
     tt_val = (total_pt + total_ct) if all_usage_complete else None
 
     conn.execute(
-        "INSERT INTO runs (id, task_id, arm, seed, model, success, cost_usd, "
-        "wall_seconds, git_sha, created_at, prompt_tokens, completion_tokens, total_tokens, usage_complete, termination_reason) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (run_id, task_id, arm, seed, settings.model, int(agent_success),
-         0.0, wall, None, finished.isoformat(), pt_val, ct_val, tt_val, int(all_usage_complete), stop_reason),
-    )
-    conn.execute(
         "INSERT INTO episodes (id, run_id, task_id, created_at, plan, actions, outcome, success) "
         "VALUES (?,?,?,?,?,?,?,?)",
         (str(uuid4()), run_id, task_id, finished.isoformat(), None,
          json.dumps(transcript), final_summary, int(agent_success)),
     )
-    conn.commit()
-    conn.close()
-    client.close()
+    finish_run(
+        conn,
+        run_id,
+        success=agent_success,
+        wall_seconds=wall,
+        prompt_tokens=pt_val,
+        completion_tokens=ct_val,
+        total_tokens=tt_val,
+        usage_complete=all_usage_complete,
+        termination_reason=stop_reason,
+        finished_at=finished.isoformat(),
+    )
 
     return {
         "run_id": run_id,
@@ -273,4 +412,32 @@ def run_task(
         "usage_complete": all_usage_complete,
         "used_json_schema": use_json_schema,
         "stop_reason": stop_reason,
+        "recovered_actions": recovered_actions,
+        "recovered_runs": recovered_runs,
     }
+
+
+def run_task(
+    task: str,
+    settings: Settings,
+    arm: str = "A",
+    seed: int = 0,
+    benchmark_task_id: str | None = None,
+    system_prompt: str | None = None,
+    use_json_schema: bool = True,
+) -> dict:
+    """Run NOVA under an exclusive database lock and recover old journal entries."""
+    lock_path = settings.db.resolve().with_name(
+        settings.db.name + ".runtime.lock"
+    )
+
+    with RuntimeLock(lock_path):
+        return _run_task_locked(
+            task=task,
+            settings=settings,
+            arm=arm,
+            seed=seed,
+            benchmark_task_id=benchmark_task_id,
+            system_prompt=system_prompt,
+            use_json_schema=use_json_schema,
+        )
