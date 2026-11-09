@@ -6,7 +6,7 @@ During NOVA's Protocol-X experiments, the pre-fix no-memory baseline achieved 3/
 
 Investigation identified a path-resolution defect in NOVA's `list_files` tool. The defect caused `ValueError` exceptions when absolute file paths were evaluated relative to a relative workspace path.
 
-The defect was independently reproduced using the test-only diagnostic fixture in `eval/diagnostics/reproduce_list_files_failure.py`.
+A test-only diagnostic fixture reproducing the legacy path-resolution logic successfully reproduces the same `ValueError`.
 
 After correcting the path handling, the no-memory baseline achieved 5/5 success. Both memory arms also achieved 5/5.
 

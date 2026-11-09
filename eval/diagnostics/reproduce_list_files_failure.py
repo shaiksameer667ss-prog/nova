@@ -35,7 +35,6 @@ def main() -> None:
                     "reproduced": True,
                     "exception_type": type(exc).__name__,
                     "exception_message": str(exc),
-                    "expected_remediation": "TOOL_REPAIR",
                 }
             else:
                 raise AssertionError(
