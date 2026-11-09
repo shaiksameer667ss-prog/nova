@@ -1,0 +1,21 @@
+﻿Condition,Model,Task,Seed,VerifiedSuccess,AgentSuccess,Status,TerminationReason,Steps,RejectedDoneCount,WallSeconds,PromptTokens,CompletionTokens,TotalTokens,ActionSequence,RunId
+control,qwen3.5:4b,hidden_auth,0,True,True,completed,completed,3,0,20.854599,1361,299,1660,read_file[succeeded] -> write_file[succeeded] -> done[succeeded],8d469605-07a2-40db-b600-3646ce705c01
+control,qwen3.5:4b,hidden_auth,1,True,True,completed,completed,3,0,6.602772,1361,306,1667,read_file[succeeded] -> write_file[succeeded] -> done[succeeded],2fb541e8-506a-4684-bc27-3e31660077dd
+control,qwen3.5:4b,hidden_auth,2,True,True,completed,completed,3,0,18.284976,1361,309,1670,read_file[succeeded] -> write_file[succeeded] -> done[succeeded],3cbdc078-3ad6-4e57-a697-9988bdecba7a
+control,qwen3.5:4b,hidden_auth,3,True,True,completed,completed,3,0,18.258255,1361,306,1667,read_file[succeeded] -> write_file[succeeded] -> done[succeeded],51a4b0fe-9328-4d91-9348-25a7cf5061ba
+control,qwen3.5:4b,hidden_auth,4,True,True,completed,completed,3,0,18.485274,1361,300,1661,read_file[succeeded] -> write_file[succeeded] -> done[succeeded],4a5ff592-2d87-4830-9a0f-91742b85c462
+control,qwen3.5:9b,hidden_auth,0,False,True,completed,completed,2,0,8.016059,671,268,939,read_file[succeeded] -> done[succeeded],6168368e-6f46-434d-8e01-f8a14ee2ac56
+control,qwen3.5:9b,hidden_auth,1,False,True,completed,completed,2,0,20.374703,671,110,781,read_file[succeeded] -> done[succeeded],503715e5-2e25-4014-bbf8-07a8c156822e
+control,qwen3.5:9b,hidden_auth,2,False,True,completed,completed,2,0,20.216725,671,118,789,read_file[succeeded] -> done[succeeded],ab1f72a6-c44d-46ee-9c23-e5bf4945d595
+control,qwen3.5:9b,hidden_auth,3,False,True,completed,completed,2,0,21.283248,671,117,788,read_file[succeeded] -> done[succeeded],918019ae-51ff-4459-ae24-6b7c390539e8
+control,qwen3.5:9b,hidden_auth,4,False,True,completed,completed,2,0,20.597531,671,135,806,read_file[succeeded] -> done[succeeded],de6f9778-7e69-4af7-ad8f-3726e324d4d7
+treatment,qwen3.5:4b,hidden_auth,0,True,True,completed,completed,3,0,18.468162,1361,299,1660,read_file[succeeded] -> write_file[succeeded] -> done[succeeded],5680830f-4618-4f3e-baca-69050fd2ae2d
+treatment,qwen3.5:4b,hidden_auth,1,True,True,completed,completed,3,0,7.516329,1361,306,1667,read_file[succeeded] -> write_file[succeeded] -> done[succeeded],ab633c88-c07e-4798-b2c6-d888d80b0fe1
+treatment,qwen3.5:4b,hidden_auth,2,True,True,completed,completed,3,0,7.367636,1361,309,1670,read_file[succeeded] -> write_file[succeeded] -> done[succeeded],214d22c5-954c-47be-b3ef-41b9dd944965
+treatment,qwen3.5:4b,hidden_auth,3,True,True,completed,completed,3,0,7.549709,1361,306,1667,read_file[succeeded] -> write_file[succeeded] -> done[succeeded],1221fdc0-8eec-4c85-95c3-26722e782f69
+treatment,qwen3.5:4b,hidden_auth,4,True,True,completed,completed,3,0,7.270581,1361,300,1661,read_file[succeeded] -> write_file[succeeded] -> done[succeeded],5d0227c9-6382-45a3-9991-9cbc9e14e36f
+treatment,qwen3.5:9b,hidden_auth,0,True,True,completed,completed,4,1,29.290381,2404,562,2966,read_file[succeeded] -> done[failed] -> write_file[succeeded] -> done[succeeded],09f90aef-04a2-4024-b1a9-a8b44043ee74
+treatment,qwen3.5:9b,hidden_auth,1,True,True,completed,completed,4,1,29.254171,2088,400,2488,read_file[succeeded] -> done[failed] -> write_file[succeeded] -> done[succeeded],568c554a-e0ae-44ce-b17f-88ebd9519dd8
+treatment,qwen3.5:9b,hidden_auth,2,True,True,completed,completed,4,1,12.907513,2104,399,2503,read_file[succeeded] -> done[failed] -> write_file[succeeded] -> done[succeeded],c776ff1c-a2a5-488e-aba9-6ac73386eaf9
+treatment,qwen3.5:9b,hidden_auth,3,True,True,completed,completed,4,1,13.27748,2102,404,2506,read_file[succeeded] -> done[failed] -> write_file[succeeded] -> done[succeeded],555bf55c-4288-42e8-96e8-9fcfc4f2f2d1
+treatment,qwen3.5:9b,hidden_auth,4,True,True,completed,completed,4,1,14.001876,2154,422,2576,read_file[succeeded] -> done[failed] -> write_file[succeeded] -> done[succeeded],08593c9a-44af-476e-b108-f6d717fe2b14

@@ -1,0 +1,180 @@
+
+===== qwen3.5:4b | hidden_auth | seed 0 =====
+{
+  "task_id": "hidden_auth",
+  "arm": "A",
+  "seed": 0,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 18.5,
+  "prompt_tokens": 1361,
+  "completion_tokens": 299,
+  "total_tokens": 1660,
+  "run_id": "5680830f-4618-4f3e-baca-69050fd2ae2d",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default",
+  "completion_verification": true
+}
+Exit code: 0
+
+===== qwen3.5:4b | hidden_auth | seed 1 =====
+{
+  "task_id": "hidden_auth",
+  "arm": "A",
+  "seed": 1,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 7.5,
+  "prompt_tokens": 1361,
+  "completion_tokens": 306,
+  "total_tokens": 1667,
+  "run_id": "ab633c88-c07e-4798-b2c6-d888d80b0fe1",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default",
+  "completion_verification": true
+}
+Exit code: 0
+
+===== qwen3.5:4b | hidden_auth | seed 2 =====
+{
+  "task_id": "hidden_auth",
+  "arm": "A",
+  "seed": 2,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 7.4,
+  "prompt_tokens": 1361,
+  "completion_tokens": 309,
+  "total_tokens": 1670,
+  "run_id": "214d22c5-954c-47be-b3ef-41b9dd944965",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default",
+  "completion_verification": true
+}
+Exit code: 0
+
+===== qwen3.5:4b | hidden_auth | seed 3 =====
+{
+  "task_id": "hidden_auth",
+  "arm": "A",
+  "seed": 3,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 7.5,
+  "prompt_tokens": 1361,
+  "completion_tokens": 306,
+  "total_tokens": 1667,
+  "run_id": "1221fdc0-8eec-4c85-95c3-26722e782f69",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default",
+  "completion_verification": true
+}
+Exit code: 0
+
+===== qwen3.5:4b | hidden_auth | seed 4 =====
+{
+  "task_id": "hidden_auth",
+  "arm": "A",
+  "seed": 4,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 3,
+  "wall_seconds": 7.3,
+  "prompt_tokens": 1361,
+  "completion_tokens": 300,
+  "total_tokens": 1661,
+  "run_id": "5d0227c9-6382-45a3-9991-9cbc9e14e36f",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default",
+  "completion_verification": true
+}
+Exit code: 0
+
+===== qwen3.5:9b | hidden_auth | seed 1 =====
+{
+  "task_id": "hidden_auth",
+  "arm": "A",
+  "seed": 1,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 4,
+  "wall_seconds": 29.3,
+  "prompt_tokens": 2088,
+  "completion_tokens": 400,
+  "total_tokens": 2488,
+  "run_id": "568c554a-e0ae-44ce-b17f-88ebd9519dd8",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default",
+  "completion_verification": true
+}
+Exit code: 0
+
+===== qwen3.5:9b | hidden_auth | seed 2 =====
+{
+  "task_id": "hidden_auth",
+  "arm": "A",
+  "seed": 2,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 4,
+  "wall_seconds": 12.9,
+  "prompt_tokens": 2104,
+  "completion_tokens": 399,
+  "total_tokens": 2503,
+  "run_id": "c776ff1c-a2a5-488e-aba9-6ac73386eaf9",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default",
+  "completion_verification": true
+}
+Exit code: 0
+
+===== qwen3.5:9b | hidden_auth | seed 3 =====
+{
+  "task_id": "hidden_auth",
+  "arm": "A",
+  "seed": 3,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 4,
+  "wall_seconds": 13.3,
+  "prompt_tokens": 2102,
+  "completion_tokens": 404,
+  "total_tokens": 2506,
+  "run_id": "555bf55c-4288-42e8-96e8-9fcfc4f2f2d1",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default",
+  "completion_verification": true
+}
+Exit code: 0
+
+===== qwen3.5:9b | hidden_auth | seed 4 =====
+{
+  "task_id": "hidden_auth",
+  "arm": "A",
+  "seed": 4,
+  "memory_injected": false,
+  "memory_item_id": null,
+  "verified_success": true,
+  "steps": 4,
+  "wall_seconds": 14.0,
+  "prompt_tokens": 2154,
+  "completion_tokens": 422,
+  "total_tokens": 2576,
+  "run_id": "08593c9a-44af-476e-b108-f6d717fe2b14",
+  "system_prompt_sha256": "cf433119e498f5e64ef33a2a4702d20ca63e0679f47f47b304b165d5f2b17a2f",
+  "system_prompt_source": "default",
+  "completion_verification": true
+}
+Exit code: 0
