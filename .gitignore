@@ -10,4 +10,4 @@ workspace/
 .ipynb_checkpoints/
 *.egg-info/
 dist/
-build/
+build/code

@@ -6,6 +6,16 @@ from uuid import uuid4
 from nova.client import ModelClient
 from nova.config import Settings
 from nova.controller.contracts import ACTION_CONTRACTS, validate_action
+from nova.controller.planning import (
+    PLAN_RESPONSE_FORMAT,
+    PlanValidationError,
+    add_plan_revision,
+    build_initial_plan_messages,
+    build_replan_messages,
+    create_plan_record,
+    parse_plan,
+    render_plan_context,
+)
 from nova.controller.reliability import FailureTracker
 from nova.controller.runtime_lock import RuntimeLock
 from nova.memory.db import (
@@ -68,6 +78,7 @@ NOVA_RESPONSE_FORMAT = {
 # Finding 7: controller guard for the tested tool and threshold.
 LOOP_GUARD_TOOL = "list_files"
 LOOP_GUARD_THRESHOLD = 3
+MAX_PLAN_REVISIONS = 2
 
 
 def _parse_action(text: str) -> dict:
@@ -103,6 +114,7 @@ def _run_task_locked(
     benchmark_task_id: str | None = None,
     system_prompt: str | None = None,
     use_json_schema: bool = True,
+    planning_mode: bool = False,
 ) -> dict:
     settings.workspace.mkdir(parents=True, exist_ok=True)
 
@@ -139,6 +151,7 @@ def _run_task_locked(
                     benchmark_task_id=benchmark_task_id,
                     system_prompt=system_prompt,
                     use_json_schema=use_json_schema,
+                    planning_mode=planning_mode,
                     client=client,
                     conn=conn,
                     run_id=run_id,
@@ -163,6 +176,7 @@ def _run_task_with_resources(
     benchmark_task_id: str | None = None,
     system_prompt: str | None = None,
     use_json_schema: bool = True,
+    planning_mode: bool = False,
     *,
     client: ModelClient,
     conn,
@@ -186,12 +200,78 @@ def _run_task_with_resources(
     total_ct = 0
     all_usage_complete = True
 
+    plan_record = None
+    planning_error_message = None
+    replan_count = 0
+
+    def record_planning_model_call(purpose, usage_info, status):
+        nonlocal total_pt, total_ct, all_usage_complete
+
+        complete = usage_info.get("usage_complete") is True
+        conn.execute(
+            "INSERT INTO model_calls "
+            "(id, run_id, purpose, model, prompt_tokens, completion_tokens, "
+            "total_tokens, status, usage_complete, usage_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid4()),
+                run_id,
+                purpose,
+                settings.model,
+                usage_info.get("prompt_tokens"),
+                usage_info.get("completion_tokens"),
+                usage_info.get("total_tokens"),
+                status,
+                int(complete),
+                usage_info.get("usage_json"),
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+        conn.commit()
+
+        if complete:
+            total_pt += usage_info["prompt_tokens"]
+            total_ct += usage_info["completion_tokens"]
+        else:
+            all_usage_complete = False
+
+    def request_plan(plan_messages, purpose):
+        raw_plan, usage_info, status = client.chat_with_usage(
+            plan_messages,
+            seed=seed,
+            max_tokens=1024,
+            response_format=PLAN_RESPONSE_FORMAT,
+            reasoning_effort="none",
+        )
+
+        record_planning_model_call(purpose, usage_info, status)
+
+        if status != "success":
+            return None, f"model_call_failed: {status}"
+
+        try:
+            return parse_plan(raw_plan), None
+        except PlanValidationError as exc:
+            return None, f"invalid_plan_response: {exc}"
+
+    if planning_mode:
+        initial_plan, planning_error_message = request_plan(
+            build_initial_plan_messages(task),
+            "planning",
+        )
+        if initial_plan is not None:
+            plan_record = create_plan_record(initial_plan)
+            messages.append({
+                "role": "user",
+                "content": render_plan_context(plan_record),
+            })
+
     # Generalized repeated-failure detection for this run.
     failure_tracker = FailureTracker(threshold=LOOP_GUARD_THRESHOLD)
     loop_detected = False
     model_error = False
 
-    for step in range(settings.max_steps):
+    for step in range(settings.max_steps if not planning_error_message else 0):
         if use_json_schema:
             raw, usage_info, status = client.chat_with_usage(
                 messages,
@@ -301,10 +381,12 @@ def _run_task_with_resources(
             agent_success = True
             break
 
+        action_failed = False
         try:
             observation = _dispatch(action, settings)
 
         except Exception as e:  # noqa: BLE001 - journal and contain arbitrary tool failures
+            action_failed = True
             observation = f"ERROR: {type(e).__name__}: {e}"
 
             failure_decision = failure_tracker.record_failure(
@@ -364,6 +446,47 @@ def _run_task_with_resources(
         messages.append({"role": "assistant", "content": raw})
         messages.append({"role": "user", "content": f"Observation:\n{observation}"})
 
+        if (
+            planning_mode
+            and action_failed
+            and plan_record is not None
+            and replan_count < MAX_PLAN_REVISIONS
+        ):
+            replan_count += 1
+            revised_plan, revision_error = request_plan(
+                build_replan_messages(
+                    task,
+                    plan_record,
+                    action,
+                    observation,
+                ),
+                "replanning",
+            )
+
+            if revision_error is None:
+                try:
+                    plan_record = add_plan_revision(plan_record, revised_plan)
+                except PlanValidationError as exc:
+                    revision_error = f"invalid_plan_revision: {exc}"
+
+            if revision_error is not None:
+                transcript[-1]["plan_revision_error"] = revision_error
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Plan revision failed. The previous plan remains active. "
+                        "Use the actual observation, avoid unsupported claims, "
+                        "and continue cautiously. Revision error: "
+                        f"{revision_error[:500]}"
+                    ),
+                })
+            else:
+                transcript[-1]["plan_revision"] = replan_count
+                messages.append({
+                    "role": "user",
+                    "content": render_plan_context(plan_record),
+                })
+
     finished = datetime.now(UTC)
     wall = (finished - started).total_seconds()
 
@@ -371,6 +494,8 @@ def _run_task_with_resources(
         stop_reason = "loop_detected"
     elif model_error:
         stop_reason = "model_error"
+    elif planning_error_message is not None:
+        stop_reason = "planning_error"
     elif agent_success:
         stop_reason = "completed"
     else:
@@ -383,8 +508,17 @@ def _run_task_with_resources(
     conn.execute(
         "INSERT INTO episodes (id, run_id, task_id, created_at, plan, actions, outcome, success) "
         "VALUES (?,?,?,?,?,?,?,?)",
-        (str(uuid4()), run_id, task_id, finished.isoformat(), None,
-         json.dumps(transcript), final_summary, int(agent_success)),
+        (
+            str(uuid4()),
+            run_id,
+            task_id,
+            finished.isoformat(),
+            json.dumps(plan_record, ensure_ascii=False)
+            if plan_record is not None else None,
+            json.dumps(transcript),
+            final_summary,
+            int(agent_success),
+        ),
     )
     finish_run(
         conn,
@@ -414,6 +548,10 @@ def _run_task_with_resources(
         "stop_reason": stop_reason,
         "recovered_actions": recovered_actions,
         "recovered_runs": recovered_runs,
+        "planning_mode": planning_mode,
+        "planning_error": planning_error_message,
+        "plan_revisions": len(plan_record["revisions"])
+        if plan_record is not None else 0,
     }
 
 
@@ -425,6 +563,7 @@ def run_task(
     benchmark_task_id: str | None = None,
     system_prompt: str | None = None,
     use_json_schema: bool = True,
+    planning_mode: bool = False,
 ) -> dict:
     """Run NOVA under an exclusive database lock and recover old journal entries."""
     lock_path = settings.db.resolve().with_name(
@@ -440,4 +579,5 @@ def run_task(
             benchmark_task_id=benchmark_task_id,
             system_prompt=system_prompt,
             use_json_schema=use_json_schema,
+            planning_mode=planning_mode,
         )

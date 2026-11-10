@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "benchmark": "NOVA-EVAL",
+  "benchmark_version": "0.1",
+  "task_id": "inventory_batch",
+  "task_version": "1.0.0",
+  "family": "state_management",
+  "split": "development",
+  "status": "CANDIDATE",
+  "provenance": {
+    "origin": "adapted",
+    "description": "Adapted from the existing NOVA inventory_batch evaluation task. The original task package remains unchanged."
+  },
+  "environment": {
+    "language": "python",
+    "framework": "pytest",
+    "python_version": "3.12+"
+  },
+  "verifier": {
+    "type": "pytest",
+    "test_path": "hidden_tests/test_ledger.py",
+    "timeout_seconds": 60,
+    "version": "1.0.0"
+  },
+  "files": {
+    "hidden_tests/test_ledger.py": "273d20c202b8b104b4ef184c3aed19a47181a4c46effb73e66e938f6116226c2",
+    "reference/ledger.py": "feb1d1af683936c0360c542698d09925f42b88bb906632d43c761405fde710f0",
+    "repo/ledger.py": "8c3723c26ca65d3b149b25ca96562f3377820fd1777b41f531b91daeec294ff2",
+    "task.yaml": "997d6bc9057fd9a83fb5832e4089e627f979dc4850f99babf83da611d80479c9",
+    "VALIDITY.md": "fc879e45a0b85df8e1c69d80acbaf1a6634b06e9b111135432534f4849f6cdaa"
+  },
+  "validation": {
+    "V01_starter_rejection": {
+      "status": "pass",
+      "evidence": "Original starter rejected: pytest exit code 1; 2 of 3 tests failed (double commit and stage after commit)."
+    },
+    "V02_reference_acceptance": {
+      "status": "pass",
+      "evidence": "Reference accepted: 3 of 3 tests passed in each of three fresh temporary workspaces."
+    },
+    "V03_incorrect_mutation_rejection": {
+      "status": "pass",
+      "evidence": "Deliberately incorrect mutation cleared staged adjustments before applying them; pytest exit code 1 and all 3 tests failed."
+    },
+    "V04_protected_file_integrity": {
+      "status": "not_run",
+      "evidence": "Pending independent validation."
+    },
+    "V05_hidden_test_isolation": {
+      "status": "not_run",
+      "evidence": "Pending independent validation."
+    },
+    "V06_repeatability": {
+      "status": "pass",
+      "evidence": "Reference produced the same successful 3-test outcome in three independent temporary workspaces."
+    },
+    "V07_deterministic_scoring": {
+      "status": "not_run",
+      "evidence": "Pending independent validation."
+    },
+    "V08_budget_feasibility": {
+      "status": "not_run",
+      "evidence": "Pending independent validation."
+    },
+    "V09_no_verifier_leakage": {
+      "status": "not_run",
+      "evidence": "Pending independent validation."
+    },
+    "V10_provenance": {
+      "status": "not_run",
+      "evidence": "Pending independent validation."
+    }
+  }
+}
