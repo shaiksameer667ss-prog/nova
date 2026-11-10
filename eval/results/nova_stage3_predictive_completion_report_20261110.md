@@ -1,4 +1,4 @@
-﻿# NOVA Stage 3 — Predictive Completion Research Report
+# NOVA Stage 3 — Predictive Completion Research Report
 
 **Date:** 2026-11-10
 **Branch:** research/stage-3-predictive-completion
@@ -106,3 +106,54 @@ Before integrating prediction into NOVA:
 - Test whether predictions remain useful when task-specific action heuristics are unavailable.
 
 No production controller changes are part of this experiment.
+
+
+## 9. Deterministic baseline comparison
+
+A deterministic baseline was evaluated on the canonical 40-run model comparison dataset.
+
+Rule:
+Predict PASS when a `write_file` action occurs before the first `done` action; otherwise predict FAIL.
+
+Results:
+
+| Metric | Result |
+|---|---:|
+| Total records | 40 |
+| True positives | 35 |
+| True negatives | 5 |
+| False positives | 0 |
+| False negatives | 0 |
+| Accuracy | 100% |
+| Balanced accuracy | 100% |
+
+All eight task/model groups achieved 5/5 accuracy.
+
+### Comparison with the LLM predictor
+
+The v2 LLM predictor achieved 19/19 correct predictions among usable responses on the ten unique hidden_auth histories. The deterministic baseline also achieved 10/10 on those histories and 40/40 on the broader benchmark.
+
+No incremental predictive value from the LLM has been demonstrated on the available evidence.
+
+### Important limitations
+
+- Ten records overlap with the Stage 3 hidden_auth experiment.
+- All five negative outcomes came from qwen3.5:9b on hidden_auth.
+- The rule may simply identify this specific missing-write failure pattern.
+- It may incorrectly reject valid read-only tasks.
+- It may accept a failed implementation that performed a write but wrote incorrect content.
+- The four task families and five failures are insufficient to establish generalization.
+
+The rule is an evaluation baseline, not a production completion policy.
+
+## 10. Stage 3 decision
+
+Do not integrate the LLM predictor or the write-before-done heuristic into the production controller.
+
+The next research phase should deliberately collect counterexamples:
+1. Successful tasks that require no write operation.
+2. Failed tasks that perform one or more write operations.
+3. Incorrect writes, wrong-file writes, and incomplete multi-step changes.
+4. Tasks with different verification criteria and action sequences.
+
+The objective is to establish whether a predictor adds value beyond simple observable-action rules on held-out task families.
