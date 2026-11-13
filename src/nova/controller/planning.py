@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -102,6 +103,9 @@ Requirements:
 - Use only actions and arguments listed in available_actions.
 - Never invent commands, flags, parameters, or fallback tools.
 - Treat action descriptions as authoritative capability limits.
+- Treat every explicit task prohibition as a hard constraint.
+- Do not propose prohibited operations in steps or success criteria.
+- Preserve distinctions between read-only inspection, modification, and execution.
 - Return JSON only, matching the supplied schema.
 - Set change_summary to "Initial plan".
 """
@@ -118,6 +122,9 @@ Produce a revised plan that:
 - Distinguish transient failures from unsupported operations.
 - Retrying an action may be appropriate after a transient failure.
 - Never claim a fallback mechanism unless an available action supports it.
+- Treat every explicit task prohibition as a hard constraint.
+- Do not propose prohibited operations in steps or success criteria.
+- Preserve distinctions between read-only inspection, modification, and execution.
 - Avoids repeating the same ineffective approach without justification.
 - Retains useful steps where appropriate.
 - Changes the strategy when necessary.
@@ -202,7 +209,131 @@ def validate_plan(value: Any) -> dict:
     }
 
 
-def parse_plan(response: str) -> dict:
+_TEST_RESOURCE_PATTERN = re.compile(
+    r"\b(?:hidden\s+)?tests?\b|\btest\s+files?\b|"
+    r"\btest\s+suite\b|\bpytest\b",
+    re.IGNORECASE,
+)
+
+_TEST_ACTION_PATTERNS = {
+    "read": re.compile(
+        r"\b(?:read\w*|inspect\w*|examin\w*|view\w*|open\w*|access\w*)\b",
+        re.IGNORECASE,
+    ),
+    "modification": re.compile(
+        r"\b(?:modif\w*|edit\w*|chang\w*|updat\w*|writ\w*|alter\w*|"
+        r"delet\w*|remov\w*)\b",
+        re.IGNORECASE,
+    ),
+    "execution": re.compile(
+        r"\b(?:execut\w*|run\w*|invok\w*|launch\w*|call\w*|"
+        r"pytest|verif\w*|check\w*|validat\w*|pass\w*)\b",
+        re.IGNORECASE,
+    ),
+}
+
+_TASK_PROHIBITION_PATTERN = re.compile(
+    r"\b(?:do\s+not|don't|must\s+not|mustn't|never)\b",
+    re.IGNORECASE,
+)
+
+_PASSIVE_PROHIBITION_PATTERN = re.compile(
+    r"\b(?:must\s+not|mustn't|may\s+not|cannot|can't|"
+    r"should\s+not|shall\s+not)\b(?P<clause>[^.!?\n]{0,100})",
+    re.IGNORECASE,
+)
+
+_NEGATED_PLAN_ACTION_PATTERN = re.compile(
+    r"\b(?:do\s+not|don't|must\s+not|mustn't|may\s+not|cannot|can't|"
+    r"should\s+not|shouldn't|shall\s+not|is\s+not|are\s+not|was\s+not|"
+    r"were\s+not|have\s+not|has\s+not|had\s+not|isn't|aren't|wasn't|"
+    r"weren't|hasn't|haven't|hadn't|tests?\s+not|test\s+files?\s+not|"
+    r"no|never|avoid|without)\b"
+    r"(?:\W+\w+){0,5}\W*$",
+    re.IGNORECASE,
+)
+
+
+def _explicitly_prohibited_test_actions(task: str) -> set[str]:
+    """Extract test-operation categories explicitly prohibited by the task."""
+    prohibited = set()
+
+    for resource in _TEST_RESOURCE_PATTERN.finditer(task):
+        prefix = task[max(0, resource.start() - 140):resource.start()]
+        negations = list(_TASK_PROHIBITION_PATTERN.finditer(prefix))
+
+        if negations:
+            clause = prefix[negations[-1].end():]
+            for category, pattern in _TEST_ACTION_PATTERNS.items():
+                if pattern.search(clause):
+                    prohibited.add(category)
+
+        suffix = task[resource.end():resource.end() + 120]
+        passive = _PASSIVE_PROHIBITION_PATTERN.search(suffix)
+        if passive:
+            clause = passive.group("clause")
+            for category, pattern in _TEST_ACTION_PATTERNS.items():
+                if pattern.search(clause):
+                    prohibited.add(category)
+
+    return prohibited
+
+
+def _plan_requires_prohibited_test_action(
+    text: str,
+    category: str,
+) -> bool:
+    resources = list(_TEST_RESOURCE_PATTERN.finditer(text))
+    actions = list(_TEST_ACTION_PATTERNS[category].finditer(text))
+
+    if not resources or not actions:
+        return False
+
+    # Associate each test resource with its nearest action. This avoids
+    # treating "Modify the implementation without changing tests" as a
+    # proposal to modify tests merely because both words occur in the text.
+    for resource in resources:
+        action = min(
+            actions,
+            key=lambda candidate: abs(candidate.start() - resource.start()),
+        )
+        if abs(action.start() - resource.start()) > 120:
+            continue
+
+        prefix = text[max(0, action.start() - 80):action.start()]
+        if _NEGATED_PLAN_ACTION_PATTERN.search(prefix):
+            continue
+
+        return True
+
+    return False
+
+
+def validate_plan_for_task(value: Any, task: str) -> dict:
+    """Validate plan structure and enforce explicit task prohibitions."""
+    if not isinstance(task, str) or not task.strip():
+        raise PlanValidationError("Task must not be empty.")
+
+    normalized = validate_plan(value)
+    prohibited = _explicitly_prohibited_test_actions(task)
+
+    if not prohibited:
+        return normalized
+
+    for field in ("steps", "success_criteria"):
+        for index, item in enumerate(normalized[field]):
+            for category in sorted(prohibited):
+                if _plan_requires_prohibited_test_action(item, category):
+                    raise PlanValidationError(
+                        "Plan violates task constraint: "
+                        f"{field}[{index}] proposes prohibited test "
+                        f"{category}."
+                    )
+
+    return normalized
+
+
+def parse_plan(response: str, task: str | None = None) -> dict:
     """Parse and validate a JSON plan returned by the model."""
     if not isinstance(response, str):
         raise PlanValidationError("Model plan response must be a string.")
@@ -221,7 +352,9 @@ def parse_plan(response: str) -> dict:
             f"Model returned invalid plan JSON: {exc}"
         ) from exc
 
-    return validate_plan(value)
+    if task is None:
+        return validate_plan(value)
+    return validate_plan_for_task(value, task)
 
 
 def create_plan_record(plan: dict) -> dict:
