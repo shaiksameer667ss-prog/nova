@@ -10,4 +10,8 @@ workspace/
 .ipynb_checkpoints/
 *.egg-info/
 dist/
-build/code
+build/
+code
+
+# Backup files from scripted patches
+*.bak.*
