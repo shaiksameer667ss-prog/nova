@@ -11,7 +11,6 @@ from unittest.mock import patch
 from nova.config import Settings
 from nova.controller import loop
 
-
 TASK = """Create a file named answer.txt.
 
 The entire file must contain exactly this text, with no trailing newline:

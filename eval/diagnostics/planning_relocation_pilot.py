@@ -7,7 +7,6 @@ from pathlib import Path
 from nova.config import Settings
 from nova.controller import loop
 
-
 TASK = """Read the workspace's settings file and return its exact contents.
 
 The last known path is config/settings.json.
