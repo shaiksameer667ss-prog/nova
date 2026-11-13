@@ -216,6 +216,53 @@ def test_replanning_is_bounded_to_two_revisions(tmp_path):
     assert sum(row["purpose"] == "replanning" for row in calls) == 2
 
 
+def test_initial_plan_with_prohibited_test_execution_stops_before_actions(
+    tmp_path,
+):
+    settings = make_settings(tmp_path)
+    invalid_plan = json.loads(plan())
+    invalid_plan["steps"] = [
+        "Inspect the parser implementation.",
+        "Run pytest against the hidden tests.",
+    ]
+    invalid_response = json.dumps(invalid_plan)
+    fake_client = install_model([
+        (invalid_response, usage(), "success"),
+        (invalid_response, usage(), "success"),
+    ])
+
+    with patch(
+        "nova.controller.loop.ModelClient", return_value=fake_client
+    ):
+        from nova.controller.loop import run_task
+        result = run_task(
+            "Repair the parser. Do not modify or execute tests.",
+            settings,
+            planning_mode=True,
+        )
+
+    assert result["agent_success"] is False
+    assert result["stop_reason"] == "planning_error"
+    assert "prohibited test execution" in result["planning_error"]
+    assert fake_client.chat_with_usage.call_count == 2
+    assert len(result["planning_attempts"]) == 2
+    assert all(
+        attempt["accepted"] is False
+        for attempt in result["planning_attempts"]
+    )
+    assert all(
+        attempt["response"] == invalid_response
+        for attempt in result["planning_attempts"]
+    )
+
+    episodes, calls = read_database(settings)
+    assert episodes[0]["plan"] is None
+    assert [row["purpose"] for row in calls] == [
+        "planning",
+        "planning_correction",
+    ]
+
+
 def test_initial_planning_failure_stops_before_actions(tmp_path):
     settings = make_settings(tmp_path)
     failed_usage = {

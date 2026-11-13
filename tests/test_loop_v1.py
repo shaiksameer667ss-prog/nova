@@ -399,3 +399,121 @@ def test_resources_close_when_controller_execution_raises(tmp_path):
     assert failed_run is not None
     assert failed_run[0:2] == ("failed", "RuntimeError")
     assert failed_run[2] is not None
+
+def test_invalid_initial_plan_gets_one_strictly_validated_correction(tmp_path):
+    import json
+
+    settings = _make_settings(tmp_path)
+    settings.max_steps = 1
+
+    invalid_plan = {
+        "objective": "Fix escaped quote handling.",
+        "steps": [
+            "Inspect parser.py and tokenizer.py.",
+            "Correct the quote-state handling.",
+        ],
+        "success_criteria": [
+            "Run pytest to verify the parser fix.",
+        ],
+        "risks": [],
+        "change_summary": "Initial plan",
+    }
+    corrected_plan = {
+        "objective": "Fix escaped quote handling.",
+        "steps": [
+            "Inspect parser.py and tokenizer.py.",
+            "Correct the quote-state handling.",
+        ],
+        "success_criteria": [
+            "Quoted semicolons remain part of their quoted values.",
+            "Escaped quotes decode to literal quote characters.",
+        ],
+        "risks": [],
+        "change_summary": "Corrected plan",
+    }
+    responses = [
+        json.dumps(invalid_plan),
+        json.dumps(corrected_plan),
+        '{"action":"done","summary":"Plan accepted"}',
+    ]
+
+    with patch("nova.controller.loop.ModelClient") as MockClient:
+        client = MockClient.return_value
+        client.chat_with_usage.side_effect = [
+            (raw, _fake_usage(), "success") for raw in responses
+        ]
+        client.close = MagicMock()
+
+        result = run_task(
+            "Do not modify or execute tests.",
+            settings,
+            planning_mode=True,
+        )
+
+    assert len(result["planning_attempts"]) == 2
+    first, second = result["planning_attempts"]
+    assert first["accepted"] is False
+    assert first["response"] == responses[0]
+    assert "prohibited test execution" in first["validation_error"]
+    assert second["accepted"] is True
+    assert second["response"] == responses[1]
+    assert client.chat_with_usage.call_count == 3
+
+    correction_messages = client.chat_with_usage.call_args_list[1].args[0]
+    assert correction_messages[-2] == {
+        "role": "assistant",
+        "content": responses[0],
+    }
+    assert "prohibited test execution" in correction_messages[-1]["content"]
+
+    with sqlite3.connect(settings.db) as connection:
+        purposes = [
+            row[0] for row in connection.execute(
+                "SELECT purpose FROM model_calls WHERE run_id = ? "
+                "ORDER BY created_at, rowid",
+                (result["run_id"],),
+            )
+        ]
+    assert purposes[:2] == ["planning", "planning_correction"]
+
+
+def test_invalid_plan_and_invalid_correction_stop_without_execution(tmp_path):
+    import json
+
+    settings = _make_settings(tmp_path)
+    invalid_plan = {
+        "objective": "Fix escaped quote handling.",
+        "steps": [
+            "Inspect parser.py and tokenizer.py.",
+            "Correct the quote-state handling.",
+        ],
+        "success_criteria": [
+            "Run pytest to verify the parser fix.",
+        ],
+        "risks": [],
+        "change_summary": "Initial plan",
+    }
+    raw = json.dumps(invalid_plan)
+
+    with patch("nova.controller.loop.ModelClient") as MockClient:
+        client = MockClient.return_value
+        client.chat_with_usage.side_effect = [
+            (raw, _fake_usage(), "success"),
+            (raw, _fake_usage(), "success"),
+        ]
+        client.close = MagicMock()
+
+        result = run_task(
+            "Do not modify or execute tests.",
+            settings,
+            planning_mode=True,
+        )
+
+    assert result["stop_reason"] == "planning_error"
+    assert result["steps"] == 0
+    assert client.chat_with_usage.call_count == 2
+    assert len(result["planning_attempts"]) == 2
+    assert all(not item["accepted"] for item in result["planning_attempts"])
+    assert all(item["response"] == raw for item in result["planning_attempts"])
+    assert "invalid_plan_response_after_correction" in result["planning_error"]
+

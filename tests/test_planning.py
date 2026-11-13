@@ -43,6 +43,62 @@ def test_parse_plan_accepts_json():
     assert parse_plan(raw) == valid_plan()
 
 
+@pytest.mark.parametrize(
+    ("task", "step", "message"),
+    [
+        (
+            "Fix the parser. Do not execute tests.",
+            "Run pytest and confirm the tests pass.",
+            "prohibited test execution",
+        ),
+        (
+            "Fix the parser. Do not modify or execute tests.",
+            "Update the test files to match the new behavior.",
+            "prohibited test modification",
+        ),
+        (
+            "Fix the parser. Do not inspect tests.",
+            "Inspect the hidden tests for expected behavior.",
+            "prohibited test read",
+        ),
+    ],
+)
+def test_parse_plan_rejects_explicitly_prohibited_test_actions(
+    task, step, message
+):
+    plan = valid_plan(steps=[
+        "Inspect the parser implementation.",
+        step,
+    ])
+    with pytest.raises(PlanValidationError, match=message):
+        parse_plan(json.dumps(plan), task=task)
+
+
+def test_parse_plan_allows_read_only_inspection_when_not_prohibited():
+    task = "Fix the parser. Do not modify or execute tests."
+    plan = valid_plan(steps=[
+        "Inspect the parser implementation.",
+        "Read the test file without modifying or executing it.",
+    ])
+    assert parse_plan(json.dumps(plan), task=task) == plan
+
+
+def test_plan_prompts_preserve_explicit_task_constraints():
+    task = "Fix the parser. Do not modify or execute tests."
+    initial = build_initial_plan_messages(task)
+
+    assert "every explicit task prohibition" in initial[0]["content"]
+    assert "read-only inspection" in initial[0]["content"]
+
+    revised = build_replan_messages(
+        task,
+        create_plan_record(valid_plan()),
+        {"action": "read_file", "path": "parser.py"},
+        "Observed parser behavior.",
+    )
+    assert "every explicit task prohibition" in revised[0]["content"]
+
+
 def test_parse_plan_accepts_json_code_fence():
     raw = "```json\n" + json.dumps(valid_plan()) + "\n```"
     assert parse_plan(raw) == valid_plan()
@@ -251,3 +307,21 @@ def test_rendered_plan_context_includes_action_capabilities():
     assert "write_file" in rendered
     assert "read_file" in rendered
     assert "list_files" in rendered
+
+@pytest.mark.parametrize(
+    "criterion",
+    [
+        "No test files are modified or executed.",
+        "Test files must not be modified or executed.",
+        "Tests should not be modified or run.",
+        "Tests are not modified or executed.",
+        "Modify the implementation without changing tests.",
+        "Do not modify or execute tests.",
+    ],
+)
+def test_parse_plan_accepts_non_prohibited_test_constraints(criterion):
+    task = "Fix the parser. Do not modify or execute tests."
+    plan = valid_plan(success_criteria=[criterion])
+
+    assert parse_plan(json.dumps(plan), task=task) == plan
+
