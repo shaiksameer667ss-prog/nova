@@ -777,6 +777,7 @@ def _run_task_with_resources(
     consecutive_dependency_target_rejections = 0
     causal_review_history = []
     observed_files = {}
+    pending_uncertain_writes: dict[str, str] = {}
     last_behavioral_probe = None
     last_probe_contract_feedback = None
     last_dependency_target_feedback = None
@@ -1998,6 +1999,53 @@ def _run_task_with_resources(
         transcript[-1]["execution_id"] = execution_id
 
         if action_kind == "done":
+            if pending_uncertain_writes:
+                done_rejections += 1
+                unresolved_paths = sorted(pending_uncertain_writes)
+                reason = (
+                    "Completion rejected: uncertain writes require a successful "
+                    "read_file with exact matching contents. Unverified paths: "
+                    + ", ".join(unresolved_paths)
+                )
+                transcript[-1]["execution_status"] = (
+                    "rejected_by_completion_gate"
+                )
+                transcript[-1]["completion_gate"] = (
+                    "uncertain_write_readback"
+                )
+                transcript[-1]["completion_gate_error"] = reason
+
+                reason_bytes = reason.encode("utf-8")
+                reason_digest = hashlib.sha256(reason_bytes).hexdigest()
+                finish_action_execution(
+                    conn,
+                    execution_id,
+                    status="failed",
+                    result_sha256=reason_digest,
+                    result_length=len(reason_bytes),
+                    error_type="UncertainWriteUnverified",
+                    error_fingerprint=reason_digest,
+                )
+
+                if done_rejections >= MAX_DONE_REJECTIONS:
+                    completion_gate_blocked = True
+                    break
+
+                messages.append({"role": "assistant", "content": raw})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        reason
+                        + "\nUse read_file to inspect every listed path. "
+                        "Completion requires the full returned contents to "
+                        "match the original write_file content exactly. "
+                        "If a read does not match, investigate and repair "
+                        "the file, then read it again. Do not claim completion "
+                        "while any listed path remains unverified."
+                    ),
+                })
+                continue
+
             repair_task = any(
                 term in task.lower()
                 for term in ("fix", "repair", "bug", "correct", "resolve")
@@ -2293,6 +2341,14 @@ def _run_task_with_resources(
             )
 
             transcript[-1]["execution_status"] = execution_status
+            if execution_status == "uncertain" and action_kind == "write_file":
+                uncertain_key = _workspace_relative_key(
+                    settings.workspace,
+                    action["path"],
+                )
+                if uncertain_key is not None:
+                    pending_uncertain_writes[uncertain_key] = action["content"]
+
             transcript[-1]["failure_fingerprint"] = (
                 failure_decision.fingerprint
             )
@@ -2336,6 +2392,28 @@ def _run_task_with_resources(
                 )
                 if observed_key is not None:
                     observed_files[observed_key] = observation
+
+                    if observed_key in pending_uncertain_writes:
+                        expected_content = pending_uncertain_writes[observed_key]
+                        expected_digest = hashlib.sha256(
+                            expected_content.encode("utf-8")
+                        ).hexdigest()
+                        observed_digest = hashlib.sha256(
+                            observation.encode("utf-8")
+                        ).hexdigest()
+
+                        if observation == expected_content:
+                            del pending_uncertain_writes[observed_key]
+                            transcript[-1]["uncertain_write_readback"] = "matched"
+                        else:
+                            transcript[-1]["uncertain_write_readback"] = "mismatch"
+
+                        transcript[-1]["uncertain_write_expected_sha256"] = (
+                            expected_digest
+                        )
+                        transcript[-1]["uncertain_write_observed_sha256"] = (
+                            observed_digest
+                        )
 
                     if planning_mode:
                         dependencies = observe_local_python_dependencies(

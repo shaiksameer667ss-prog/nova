@@ -177,7 +177,7 @@ def test_replanning_is_bounded_to_two_revisions(tmp_path):
         ),
         (plan("Revision two"), usage(), "success"),
         (
-            action("write_file", path="result.py", content="x"),
+            action("list_files"),
             usage(),
             "success",
         ),

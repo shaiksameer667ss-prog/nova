@@ -83,6 +83,7 @@ def test_write_with_lost_confirmation_is_recorded_uncertain(tmp_path):
     outputs = [
         '{"action":"write_file","path":"result.txt","content":"committed"}',
         '{"action":"done","summary":"Finished"}',
+        '{"action":"done","summary":"Finished"}',
     ]
 
     with (
@@ -100,6 +101,9 @@ def test_write_with_lost_confirmation_is_recorded_uncertain(tmp_path):
         client.close = MagicMock()
 
         result = run_task("Create result.txt", settings)
+
+    assert result["agent_success"] is False
+    assert result["completion_gate_blocked"] is True
 
     # The filesystem side effect happened, but the controller lost confirmation.
     assert (
@@ -414,3 +418,109 @@ def test_process_interruption_recovers_executing_write_without_replay(tmp_path):
     assert target.read_text(encoding="utf-8") == (
         "write happened before process termination"
     )
+
+def _run_uncertain_write_completion_case(tmp_path, outputs, tamper_content=None):
+    import sqlite3
+
+    settings = _settings(tmp_path)
+    original_replace = file_ops.os.replace
+
+    def replace_then_lose_confirmation(source, destination):
+        original_replace(source, destination)
+
+        if tamper_content is not None:
+            from pathlib import Path
+            Path(destination).write_text(tamper_content, encoding="utf-8")
+
+        raise OSError("simulated lost confirmation")
+
+    with (
+        patch("nova.controller.loop.ModelClient") as MockClient,
+        patch.object(
+            file_ops.os,
+            "replace",
+            side_effect=replace_then_lose_confirmation,
+        ),
+    ):
+        client = MockClient.return_value
+        client.chat_with_usage.side_effect = [
+            (raw, _usage(), "success") for raw in outputs
+        ]
+        client.close = MagicMock()
+
+        result = run_task(
+            "Create result.txt containing committed and verify it.",
+            settings,
+        )
+
+    db = sqlite3.connect(settings.db)
+    actions = db.execute(
+        """
+        SELECT action_name, status
+        FROM action_executions
+        WHERE run_id = ?
+        ORDER BY step
+        """,
+        (result["run_id"],),
+    ).fetchall()
+    db.close()
+
+    return settings, result, actions
+
+
+def test_uncertain_write_followed_by_done_is_rejected(tmp_path):
+    outputs = [
+        '{"action":"write_file","path":"result.txt","content":"committed"}',
+        '{"action":"done","summary":"Finished"}',
+        '{"action":"done","summary":"Finished"}',
+    ]
+
+    settings, result, actions = _run_uncertain_write_completion_case(
+        tmp_path, outputs
+    )
+
+    assert (settings.workspace / "result.txt").read_text() == "committed"
+    assert result["agent_success"] is False
+    assert result["completion_gate_blocked"] is True
+    assert ("write_file", "uncertain") in actions
+    assert result["stop_reason"] == "done_rejected"
+
+
+def test_uncertain_write_exact_read_allows_completion(tmp_path):
+    outputs = [
+        '{"action":"write_file","path":"result.txt","content":"committed"}',
+        '{"action":"done","summary":"Finished"}',
+        '{"action":"read_file","path":"result.txt"}',
+        '{"action":"done","summary":"Verified result.txt"}',
+    ]
+
+    settings, result, actions = _run_uncertain_write_completion_case(
+        tmp_path, outputs
+    )
+
+    assert result["agent_success"] is True
+    assert ("write_file", "uncertain") in actions
+    assert ("read_file", "succeeded") in actions
+    assert ("done", "succeeded") in actions
+    assert (settings.workspace / "result.txt").read_text() == "committed"
+
+
+def test_uncertain_write_incorrect_read_does_not_allow_completion(tmp_path):
+    outputs = [
+        '{"action":"write_file","path":"result.txt","content":"committed"}',
+        '{"action":"done","summary":"Finished"}',
+        '{"action":"read_file","path":"result.txt"}',
+        '{"action":"done","summary":"Verified result.txt"}',
+    ]
+
+    _, result, actions = _run_uncertain_write_completion_case(
+        tmp_path,
+        outputs,
+        tamper_content="tampered",
+    )
+
+    assert result["agent_success"] is False
+    assert result["completion_gate_blocked"] is True
+    assert ("write_file", "uncertain") in actions
+    assert ("read_file", "succeeded") in actions
+    assert result["stop_reason"] == "done_rejected"

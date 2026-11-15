@@ -312,7 +312,7 @@ def test_successful_retry_prevents_cross_tool_false_stop(tmp_path):
         mock_dispatch.side_effect = [
             ValueError("shared synthetic failure"),
             ValueError("shared synthetic failure"),
-            "file contents",
+            "x",
             ValueError("shared synthetic failure"),
         ]
 
