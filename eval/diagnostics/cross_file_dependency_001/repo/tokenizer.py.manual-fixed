@@ -1,0 +1,27 @@
+﻿def split_fields(source: str) -> list[str]:
+    """Split at semicolons outside double-quoted values."""
+    fields = []
+    start = 0
+    in_quotes = False
+    escaped = False
+
+    for index, char in enumerate(source):
+        if in_quotes:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_quotes = False
+        else:
+            if char == '"':
+                in_quotes = True
+            elif char == ";":
+                fields.append(source[start:index].strip())
+                start = index + 1
+
+    if in_quotes:
+        raise ValueError("Unterminated quoted value")
+
+    fields.append(source[start:].strip())
+    return fields

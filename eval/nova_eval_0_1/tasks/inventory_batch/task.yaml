@@ -1,0 +1,22 @@
+id: inventory_batch
+family: state_management
+description: Apply staged inventory adjustments exactly once.
+prompt: The InventoryLedger class in ledger.py manages stock levels. Adjustments are
+  staged first and then applied via commit_batch(). The contract requires that commit_batch()
+  applies all staged adjustments exactly once. It currently fails its tests. Fix the
+  implementation. Do not modify tests.
+language: python
+framework: pytest
+difficulty: medium
+protected_paths: []
+success_criteria:
+- All staged adjustments are applied to the correct SKU.
+- Each staged adjustment is applied exactly once.
+- A repeated commit without new adjustments does not change stock.
+- Adjustments staged after a commit are applied correctly.
+forbidden_actions:
+- Do not modify tests.
+- Do not remove or bypass the required commit behavior.
+- Do not modify files outside the task workspace.
+task_timeout_seconds: 60
+max_steps: 8

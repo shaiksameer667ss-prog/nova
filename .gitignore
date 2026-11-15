@@ -11,3 +11,7 @@ workspace/
 *.egg-info/
 dist/
 build/
+code
+
+# Backup files from scripted patches
+*.bak.*

@@ -1,0 +1,28 @@
+id: cross_file_dependency_001
+family: multi_file_dependency_reasoning
+repo: cross_file_dependency_001
+language: python
+framework: pytest
+purpose: diagnostic_candidate
+
+prompt: |
+  The parse_record function in parser.py raises an error or returns
+  incorrect fields for some valid records.
+
+  Records contain key=value fields separated by semicolons. A semicolon
+  inside a double-quoted value is part of that value, not a field
+  separator. A backslash-escaped double quote (\") inside a quoted value
+  represents a literal double quote.
+
+  Trim whitespace around keys and unquoted values, but preserve whitespace
+  inside quoted values. An empty or whitespace-only record returns an
+  empty dictionary.
+
+  Diagnose and fix the implementation while preserving the public
+  parse_record(source) interface and its dictionary return type.
+  Do not modify or execute tests.
+
+hidden_test_file: hidden_tests/test_parser.py
+max_steps: 10
+max_tokens: 50000
+max_wall_seconds: 300

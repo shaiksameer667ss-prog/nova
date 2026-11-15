@@ -45,9 +45,9 @@ def _fake_usage():
 # Schema constants
 # =========================================================================
 
-def test_schema_allows_four_actions():
+def test_schema_allows_generate_candidate_action():
     assert NOVA_ACTION_SCHEMA["properties"]["action"]["enum"] == [
-        "write_file", "read_file", "list_files", "done"
+        "write_file", "read_file", "list_files", "done", "generate_candidate"
     ]
     assert NOVA_ACTION_SCHEMA["required"] == ["action"]
     assert NOVA_ACTION_SCHEMA["additionalProperties"] is False
@@ -399,3 +399,148 @@ def test_resources_close_when_controller_execution_raises(tmp_path):
     assert failed_run is not None
     assert failed_run[0:2] == ("failed", "RuntimeError")
     assert failed_run[2] is not None
+
+def test_invalid_initial_plan_gets_one_strictly_validated_correction(tmp_path):
+    import json
+
+    settings = _make_settings(tmp_path)
+    settings.max_steps = 1
+
+    invalid_plan = {
+        "objective": "Fix escaped quote handling.",
+        "steps": [
+            "Inspect parser.py and tokenizer.py.",
+            "Correct the quote-state handling.",
+        ],
+        "success_criteria": [
+            "Run pytest to verify the parser fix.",
+        ],
+        "risks": [],
+        "change_summary": "Initial plan",
+    }
+    corrected_plan = {
+        "objective": "Fix escaped quote handling.",
+        "steps": [
+            "Inspect parser.py and tokenizer.py.",
+            "Correct the quote-state handling.",
+        ],
+        "success_criteria": [
+            "Quoted semicolons remain part of their quoted values.",
+            "Escaped quotes decode to literal quote characters.",
+        ],
+        "risks": [],
+        "change_summary": "Corrected plan",
+    }
+    responses = [
+        json.dumps(invalid_plan),
+        json.dumps(corrected_plan),
+        '{"action":"done","summary":"Plan accepted"}',
+    ]
+
+    with patch("nova.controller.loop.ModelClient") as MockClient:
+        client = MockClient.return_value
+        client.chat_with_usage.side_effect = [
+            (raw, _fake_usage(), "success") for raw in responses
+        ]
+        client.close = MagicMock()
+
+        result = run_task(
+            "Do not modify or execute tests.",
+            settings,
+            planning_mode=True,
+        )
+
+    assert len(result["planning_attempts"]) == 2
+    first, second = result["planning_attempts"]
+    assert first["accepted"] is False
+    assert first["response"] == responses[0]
+    assert "prohibited test execution" in first["validation_error"]
+    assert second["accepted"] is True
+    assert second["response"] == responses[1]
+    assert client.chat_with_usage.call_count == 3
+
+    correction_messages = client.chat_with_usage.call_args_list[1].args[0]
+    assert correction_messages[-2] == {
+        "role": "assistant",
+        "content": responses[0],
+    }
+    assert "prohibited test execution" in correction_messages[-1]["content"]
+
+    with sqlite3.connect(settings.db) as connection:
+        purposes = [
+            row[0] for row in connection.execute(
+                "SELECT purpose FROM model_calls WHERE run_id = ? "
+                "ORDER BY created_at, rowid",
+                (result["run_id"],),
+            )
+        ]
+    assert purposes[:2] == ["planning", "planning_correction"]
+
+
+def test_invalid_plan_and_invalid_correction_stop_without_execution(tmp_path):
+    import json
+
+    settings = _make_settings(tmp_path)
+    invalid_plan = {
+        "objective": "Fix escaped quote handling.",
+        "steps": [
+            "Inspect parser.py and tokenizer.py.",
+            "Correct the quote-state handling.",
+        ],
+        "success_criteria": [
+            "Run pytest to verify the parser fix.",
+        ],
+        "risks": [],
+        "change_summary": "Initial plan",
+    }
+    raw = json.dumps(invalid_plan)
+
+    with patch("nova.controller.loop.ModelClient") as MockClient:
+        client = MockClient.return_value
+        client.chat_with_usage.side_effect = [
+            (raw, _fake_usage(), "success"),
+            (raw, _fake_usage(), "success"),
+        ]
+        client.close = MagicMock()
+
+        result = run_task(
+            "Do not modify or execute tests.",
+            settings,
+            planning_mode=True,
+        )
+
+    assert result["stop_reason"] == "planning_error"
+    assert result["steps"] == 0
+    assert client.chat_with_usage.call_count == 2
+    assert len(result["planning_attempts"]) == 2
+    assert all(not item["accepted"] for item in result["planning_attempts"])
+    assert all(item["response"] == raw for item in result["planning_attempts"])
+    assert "invalid_plan_response_after_correction" in result["planning_error"]
+
+
+
+def test_probe_contract_feedback_uses_generic_signature_guidance():
+    from nova.controller.loop import _format_probe_contract_retry_feedback
+
+    message = _format_probe_contract_retry_feedback(
+        "too many positional arguments",
+        None,
+    )
+
+    assert "keyword-only" in message
+    assert "kwargs" in message
+    assert "NOT a prediction mismatch" in message
+    assert "cfd001_probe_example" not in message
+
+
+def test_probe_contract_feedback_preserves_cfd001_guidance():
+    from nova.controller.loop import _format_probe_contract_retry_feedback
+
+    message = _format_probe_contract_retry_feedback(
+        "invalid record",
+        "cross_file_dependency_001",
+    )
+
+    assert "cfd001_probe_example" in message
+    assert "runtime_value" in message
+    assert "keyword-only" not in message

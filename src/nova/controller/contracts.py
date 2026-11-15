@@ -13,6 +13,7 @@ class ActionContract:
     optional_fields: frozenset[str]
     non_empty_fields: frozenset[str]
     effect: ActionEffect
+    description: str = ""
 
 
 ACTION_CONTRACTS = MappingProxyType({
@@ -21,24 +22,52 @@ ACTION_CONTRACTS = MappingProxyType({
         optional_fields=frozenset(),
         non_empty_fields=frozenset({"path"}),
         effect="write",
+        description=(
+            "Writes supplied content exactly as UTF-8 bytes. "
+            "Does not append a newline. Creates parent directories, "
+            "writes atomically, and avoids rewriting identical content."
+        ),
     ),
     "read_file": ActionContract(
         required_fields=frozenset({"path"}),
         optional_fields=frozenset(),
         non_empty_fields=frozenset({"path"}),
         effect="read",
+        description=(
+            "Reads an existing workspace file as UTF-8 text."
+        ),
     ),
     "list_files": ActionContract(
         required_fields=frozenset(),
         optional_fields=frozenset({"subdir"}),
         non_empty_fields=frozenset({"subdir"}),
         effect="read",
+        description=(
+            "Lists workspace files recursively in sorted order. "
+            "An optional subdir selects the directory. "
+            "A missing directory returns an empty result."
+        ),
     ),
     "done": ActionContract(
         required_fields=frozenset({"summary"}),
         optional_fields=frozenset(),
         non_empty_fields=frozenset({"summary"}),
         effect="control",
+        description=(
+            "Ends the task with a summary. Does not independently "
+            "inspect or verify task results."
+        ),
+    ),
+    "generate_candidate": ActionContract(
+        required_fields=frozenset({"path"}),
+        optional_fields=frozenset({"task_context"}),
+        non_empty_fields=frozenset({"path"}),
+        effect="control",
+        description=(
+            "Loads an internally generated repair candidate for the given "
+            "workspace path into pipeline state. Writes nothing. A subsequent "
+            "done or write_file is replaced with the loaded candidate."
+        ),
     ),
 })
 
