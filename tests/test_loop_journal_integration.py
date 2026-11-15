@@ -158,7 +158,10 @@ def test_startup_recovers_old_actions_without_replaying_them(tmp_path):
     add_old_action("old-executing", "old-run-2", 0, "executing")
     conn.close()
 
-    outputs = ['{"action":"done","summary":"recovery complete"}']
+    outputs = [
+        '{"action":"done","summary":"recovery complete"}',
+        '{"action":"done","summary":"recovery complete"}',
+    ]
 
     with patch("nova.controller.loop.ModelClient") as MockClient:
         client = MockClient.return_value
@@ -168,6 +171,10 @@ def test_startup_recovers_old_actions_without_replaying_them(tmp_path):
         client.close = MagicMock()
 
         result = run_task("Check journal recovery", settings)
+
+    assert result["agent_success"] is False
+    assert result["completion_gate_blocked"] is True
+    assert result["stop_reason"] == "done_rejected"
 
     assert result["recovered_actions"] == {
         "failed": 1,
@@ -197,6 +204,7 @@ def test_startup_recovers_old_actions_without_replaying_them(tmp_path):
 
 
 def test_process_interruption_recovers_executing_write_without_replay(tmp_path):
+    import hashlib
     import os
     import sqlite3
     import subprocess
@@ -349,11 +357,16 @@ def test_process_interruption_recovers_executing_write_without_replay(tmp_path):
 
     # Restart NOVA. Its first operation is recovery; the model then finishes
     # the new task without requesting another write.
-    outputs = ['{"action":"done","summary":"Recovery completed"}']
+    outputs = [
+        '{"action":"done","summary":"Recovery completed"}',
+        '{"action":"read_file","path":"important.txt"}',
+        '{"action":"done","summary":"Readback verified"}',
+    ]
 
     def tracked_dispatch(action, active_settings):
-        with dispatch_count.open("a", encoding="utf-8") as handle:
-            handle.write("dispatch\\n")
+        if action.get("action") == "write_file":
+            with dispatch_count.open("a", encoding="utf-8") as handle:
+                handle.write("dispatch\\n")
         return original_dispatch(action, active_settings)
 
     with (
@@ -383,7 +396,8 @@ def test_process_interruption_recovers_executing_write_without_replay(tmp_path):
     try:
         status = db.execute(
             """
-            SELECT status
+            SELECT status, write_verified_at, write_observed_sha256,
+                   write_observed_length, write_verification_run_id
             FROM action_executions
             WHERE run_id = ? AND action_name = 'write_file'
             """,
@@ -392,7 +406,12 @@ def test_process_interruption_recovers_executing_write_without_replay(tmp_path):
     finally:
         db.close()
 
-    assert status == ("uncertain",)
+    expected_bytes = b"write happened before process termination"
+    assert status[0] == "uncertain"
+    assert status[1] is not None
+    assert status[2] == hashlib.sha256(expected_bytes).hexdigest()
+    assert status[3] == len(expected_bytes)
+    assert status[4] is not None
 
     db = sqlite3.connect(settings.db)
     try:
@@ -524,3 +543,128 @@ def test_uncertain_write_incorrect_read_does_not_allow_completion(tmp_path):
     assert ("write_file", "uncertain") in actions
     assert ("read_file", "succeeded") in actions
     assert result["stop_reason"] == "done_rejected"
+
+def test_latest_same_path_uncertain_write_supersedes_older_after_readback(
+    tmp_path,
+):
+    import sqlite3
+
+    settings = _settings(tmp_path)
+    original_replace = file_ops.os.replace
+    replace_calls = 0
+
+    def replace_then_lose_confirmation(source, destination):
+        nonlocal replace_calls
+        original_replace(source, destination)
+        replace_calls += 1
+        if replace_calls <= 2:
+            raise OSError(f"simulated lost confirmation {replace_calls}")
+
+    outputs = [
+        '{"action":"write_file","path":"result.txt","content":"first version"}',
+        '{"action":"write_file","path":"result.txt","content":"second version"}',
+        '{"action":"done","summary":"Finished"}',
+        '{"action":"read_file","path":"result.txt"}',
+        '{"action":"done","summary":"Verified latest version"}',
+    ]
+
+    with (
+        patch("nova.controller.loop.ModelClient") as MockClient,
+        patch.object(
+            file_ops.os,
+            "replace",
+            side_effect=replace_then_lose_confirmation,
+        ),
+    ):
+        client = MockClient.return_value
+        client.chat_with_usage.side_effect = [
+            (raw, _usage(), "success") for raw in outputs
+        ]
+        client.close = MagicMock()
+        result = run_task("Write and verify the latest version", settings)
+
+    assert result["agent_success"] is True
+    assert (settings.workspace / "result.txt").read_text() == "second version"
+
+    db = sqlite3.connect(settings.db)
+    rows = db.execute(
+        """
+        SELECT execution_id, status, write_verified_at,
+               write_superseded_at, write_superseded_by_execution_id
+        FROM action_executions
+        WHERE action_name = 'write_file'
+        ORDER BY step
+        """
+    ).fetchall()
+    db.close()
+
+    assert len(rows) == 2
+    older, newer = rows
+    assert older[1] == "uncertain"
+    assert older[2] is None
+    assert older[3] is not None
+    assert older[4] == newer[0]
+    assert newer[1] == "uncertain"
+    assert newer[2] is not None
+    assert newer[3] is None
+    assert newer[4] is None
+
+def test_readback_of_older_version_does_not_clear_newer_uncertain_write(
+    tmp_path,
+):
+    import sqlite3
+
+    settings = _settings(tmp_path)
+    original_replace = file_ops.os.replace
+    replace_calls = 0
+
+    def fail_second_replace(source, destination):
+        nonlocal replace_calls
+        replace_calls += 1
+        if replace_calls == 1:
+            original_replace(source, destination)
+        raise OSError(f"simulated uncertain write {replace_calls}")
+
+    outputs = [
+        '{"action":"write_file","path":"result.txt","content":"old version"}',
+        '{"action":"write_file","path":"result.txt","content":"new version"}',
+        '{"action":"done","summary":"Finished"}',
+        '{"action":"read_file","path":"result.txt"}',
+        '{"action":"done","summary":"Finished"}',
+    ]
+
+    with (
+        patch("nova.controller.loop.ModelClient") as MockClient,
+        patch.object(
+            file_ops.os,
+            "replace",
+            side_effect=fail_second_replace,
+        ),
+    ):
+        client = MockClient.return_value
+        client.chat_with_usage.side_effect = [
+            (raw, _usage(), "success") for raw in outputs
+        ]
+        client.close = MagicMock()
+        result = run_task("Verify the newest version", settings)
+
+    assert result["agent_success"] is False
+    assert result["completion_gate_blocked"] is True
+    assert (settings.workspace / "result.txt").read_text() == "old version"
+
+    db = sqlite3.connect(settings.db)
+    rows = db.execute(
+        """
+        SELECT status, write_verified_at, write_superseded_at
+        FROM action_executions
+        WHERE action_name = 'write_file'
+        ORDER BY step
+        """
+    ).fetchall()
+    db.close()
+
+    assert len(rows) == 2
+    assert rows[0][0] == "uncertain"
+    assert rows[0][1] is not None
+    assert rows[0][2] is None
+    assert rows[1] == ("uncertain", None, None)

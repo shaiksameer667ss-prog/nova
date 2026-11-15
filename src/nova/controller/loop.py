@@ -49,9 +49,13 @@ from nova.memory.db import (
     fail_run,
     finish_action_execution,
     finish_run,
+    get_unresolved_uncertain_writes,
+    mark_uncertain_write_verified,
     recover_interrupted_actions,
     recover_interrupted_runs,
+    recover_superseded_uncertain_writes,
     start_action_execution,
+    supersede_uncertain_writes,
 )
 from nova.tools.file_ops import list_files, read_file, write_file
 
@@ -430,6 +434,13 @@ def _workspace_relative_key(workspace: Path, relative_path: str) -> str | None:
         return None
 
 
+
+def _readback_utf8_bytes(content: str) -> bytes:
+    """Encode text as read_file returns it after universal newline handling."""
+    normalized = content.replace("\\r\\n", "\\n").replace("\\r", "\\n")
+    return normalized.encode("utf-8")
+
+
 def _snapshot_workspace_files(workspace: Path) -> set[str]:
     """Capture files that existed before NOVA began modifying the workspace."""
     root = Path(workspace).resolve()
@@ -593,6 +604,7 @@ def _run_task_locked(
                 else f"adhoc_{run_id[:8]}"
             )
             recovered_actions = recover_interrupted_actions(conn, run_id)
+            recover_superseded_uncertain_writes(conn)
 
             # Persist the run identity before the first model call.
             create_run(
@@ -777,7 +789,25 @@ def _run_task_with_resources(
     consecutive_dependency_target_rejections = 0
     causal_review_history = []
     observed_files = {}
-    pending_uncertain_writes: dict[str, str] = {}
+    pending_uncertain_writes: dict[str, list[dict]] = {}
+    unverifiable_uncertain_writes: list[dict] = []
+
+    for row in get_unresolved_uncertain_writes(conn):
+        record = {
+            "execution_id": row["execution_id"],
+            "expected_content_sha256": row["expected_content_sha256"],
+            "expected_content_length": row["expected_content_length"],
+        }
+        write_path = row["write_path"]
+
+        if (
+            not isinstance(write_path, str)
+            or not record["expected_content_sha256"]
+            or record["expected_content_length"] is None
+        ):
+            unverifiable_uncertain_writes.append(record)
+        else:
+            pending_uncertain_writes.setdefault(write_path, []).append(record)
     last_behavioral_probe = None
     last_probe_contract_feedback = None
     last_dependency_target_feedback = None
@@ -1983,6 +2013,22 @@ def _run_task_with_resources(
         idempotency_key = f"{run_id}:{step}"
 
         # Both journal commits happen before the tool is invoked.
+        write_metadata = {}
+        if action_kind == "write_file":
+            journal_write_path = _workspace_relative_key(
+                settings.workspace,
+                action["path"],
+            )
+            if journal_write_path is not None:
+                expected_content_bytes = _readback_utf8_bytes(action["content"])
+                write_metadata = {
+                    "write_path": journal_write_path,
+                    "expected_content_sha256": hashlib.sha256(
+                        expected_content_bytes
+                    ).hexdigest(),
+                    "expected_content_length": len(expected_content_bytes),
+                }
+
         create_action_execution(
             conn,
             execution_id=execution_id,
@@ -1993,19 +2039,34 @@ def _run_task_with_resources(
             idempotency_key=idempotency_key,
             request_summary=request_summary,
             request_sha256=request_sha256,
+            **write_metadata,
         )
         start_action_execution(conn, execution_id)
 
         transcript[-1]["execution_id"] = execution_id
 
         if action_kind == "done":
-            if pending_uncertain_writes:
+            if pending_uncertain_writes or unverifiable_uncertain_writes:
                 done_rejections += 1
                 unresolved_paths = sorted(pending_uncertain_writes)
+                unknown_ids = sorted(
+                    record["execution_id"]
+                    for record in unverifiable_uncertain_writes
+                )
+                details = []
+                if unresolved_paths:
+                    details.append(
+                        "paths requiring exact readback: "
+                        + ", ".join(unresolved_paths)
+                    )
+                if unknown_ids:
+                    details.append(
+                        "journal entries without safe verification metadata: "
+                        + ", ".join(unknown_ids)
+                    )
                 reason = (
-                    "Completion rejected: uncertain writes require a successful "
-                    "read_file with exact matching contents. Unverified paths: "
-                    + ", ".join(unresolved_paths)
+                    "Completion rejected: uncertain writes remain unresolved. "
+                    + "; ".join(details)
                 )
                 transcript[-1]["execution_status"] = (
                     "rejected_by_completion_gate"
@@ -2041,7 +2102,9 @@ def _run_task_with_resources(
                         "match the original write_file content exactly. "
                         "If a read does not match, investigate and repair "
                         "the file, then read it again. Do not claim completion "
-                        "while any listed path remains unverified."
+                        "while any listed path remains unverified. Journal "
+                        "entries without a safe path cannot be auto-verified "
+                        "and require operator intervention."
                     ),
                 })
                 continue
@@ -2346,8 +2409,21 @@ def _run_task_with_resources(
                     settings.workspace,
                     action["path"],
                 )
-                if uncertain_key is not None:
-                    pending_uncertain_writes[uncertain_key] = action["content"]
+                if uncertain_key is None:
+                    unverifiable_uncertain_writes.append({
+                        "execution_id": execution_id,
+                    })
+                else:
+                    expected_content_bytes = _readback_utf8_bytes(action["content"])
+                    pending_uncertain_writes.setdefault(
+                        uncertain_key, []
+                    ).append({
+                        "execution_id": execution_id,
+                        "expected_content_sha256": hashlib.sha256(
+                            expected_content_bytes
+                        ).hexdigest(),
+                        "expected_content_length": len(expected_content_bytes),
+                    })
 
             transcript[-1]["failure_fingerprint"] = (
                 failure_decision.fingerprint
@@ -2385,6 +2461,26 @@ def _run_task_with_resources(
             )
             transcript[-1]["execution_status"] = "succeeded"
 
+            if action_kind == "write_file" and write_metadata:
+                write_path = write_metadata["write_path"]
+                superseded_ids = supersede_uncertain_writes(
+                    conn, write_path, execution_id
+                )
+                if superseded_ids:
+                    superseded_set = set(superseded_ids)
+                    remaining = [
+                        record
+                        for record in pending_uncertain_writes.get(write_path, [])
+                        if record["execution_id"] not in superseded_set
+                    ]
+                    if remaining:
+                        pending_uncertain_writes[write_path] = remaining
+                    else:
+                        pending_uncertain_writes.pop(write_path, None)
+                    transcript[-1]["superseded_uncertain_write_ids"] = (
+                        superseded_ids
+                    )
+
             if action_kind == "read_file":
                 observed_key = _workspace_relative_key(
                     settings.workspace,
@@ -2393,26 +2489,82 @@ def _run_task_with_resources(
                 if observed_key is not None:
                     observed_files[observed_key] = observation
 
-                    if observed_key in pending_uncertain_writes:
-                        expected_content = pending_uncertain_writes[observed_key]
-                        expected_digest = hashlib.sha256(
-                            expected_content.encode("utf-8")
-                        ).hexdigest()
+                    pending_records = pending_uncertain_writes.get(
+                        observed_key, []
+                    )
+                    if pending_records:
+                        observed_bytes = observation.encode("utf-8")
                         observed_digest = hashlib.sha256(
-                            observation.encode("utf-8")
+                            observed_bytes
                         ).hexdigest()
+                        remaining_records = []
+                        readback_results = []
+                        superseded_ids = set()
 
-                        if observation == expected_content:
-                            del pending_uncertain_writes[observed_key]
-                            transcript[-1]["uncertain_write_readback"] = "matched"
+                        for record in pending_records:
+                            matches = (
+                                observed_digest
+                                == record["expected_content_sha256"]
+                                and len(observed_bytes)
+                                == record["expected_content_length"]
+                            )
+                            if matches:
+                                persisted = mark_uncertain_write_verified(
+                                    conn,
+                                    record["execution_id"],
+                                    observed_digest,
+                                    len(observed_bytes),
+                                    run_id,
+                                )
+                                if persisted:
+                                    readback_results.append({
+                                        "execution_id": record["execution_id"],
+                                        "status": "matched",
+                                    })
+                                    superseded_ids.update(
+                                        supersede_uncertain_writes(
+                                            conn,
+                                            observed_key,
+                                            record["execution_id"],
+                                        )
+                                    )
+                                    continue
+
+                                readback_results.append({
+                                    "execution_id": record["execution_id"],
+                                    "status": "matched_but_not_persisted",
+                                })
+                            else:
+                                readback_results.append({
+                                    "execution_id": record["execution_id"],
+                                    "status": "mismatch",
+                                })
+
+                            remaining_records.append(record)
+
+                        if superseded_ids:
+                            remaining_records = [
+                                record
+                                for record in remaining_records
+                                if record["execution_id"] not in superseded_ids
+                            ]
+                            readback_results.extend(
+                                {
+                                    "execution_id": item,
+                                    "status": "superseded",
+                                }
+                                for item in sorted(superseded_ids)
+                            )
+
+                        if remaining_records:
+                            pending_uncertain_writes[observed_key] = (
+                                remaining_records
+                            )
                         else:
-                            transcript[-1]["uncertain_write_readback"] = "mismatch"
+                            pending_uncertain_writes.pop(observed_key, None)
 
-                        transcript[-1]["uncertain_write_expected_sha256"] = (
-                            expected_digest
-                        )
-                        transcript[-1]["uncertain_write_observed_sha256"] = (
-                            observed_digest
+                        transcript[-1]["uncertain_write_readbacks"] = (
+                            readback_results
                         )
 
                     if planning_mode:

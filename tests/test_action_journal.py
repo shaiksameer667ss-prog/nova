@@ -323,3 +323,206 @@ def test_recovery_rejects_empty_current_run_id(tmp_path):
         recover_interrupted_actions(conn, "")
 
     conn.close()
+
+def test_uncertain_write_metadata_survives_process_recovery(tmp_path):
+    from nova.memory.db import get_unresolved_uncertain_writes, recover_interrupted_actions
+
+    db = tmp_path / "journal.db"
+    expected = b"persistent content"
+    digest = hashlib.sha256(expected).hexdigest()
+
+    conn = connect(db)
+    _create(
+        conn,
+        action_name="write_file",
+        effect="write",
+        write_path="nested/result.txt",
+        expected_content_sha256=digest,
+        expected_content_length=len(expected),
+    )
+    start_action_execution(conn, "exec-001")
+    conn.close()
+
+    reopened = connect(db)
+    recovered = recover_interrupted_actions(reopened, "new-run")
+    pending = get_unresolved_uncertain_writes(reopened)
+
+    assert recovered == {"failed": 0, "uncertain": 1}
+    assert len(pending) == 1
+    assert pending[0]["execution_id"] == "exec-001"
+    assert pending[0]["write_path"] == "nested/result.txt"
+    assert pending[0]["expected_content_sha256"] == digest
+    assert pending[0]["expected_content_length"] == len(expected)
+    assert get_action_execution(reopened, "exec-001")["status"] == "uncertain"
+    reopened.close()
+
+
+def test_uncertain_write_verification_requires_exact_digest_and_length(tmp_path):
+    from nova.memory.db import (
+        get_unresolved_uncertain_writes,
+        mark_uncertain_write_verified,
+    )
+
+    conn = connect(tmp_path / "journal.db")
+    expected = b"verified content"
+    digest = hashlib.sha256(expected).hexdigest()
+
+    _create(
+        conn,
+        action_name="write_file",
+        effect="write",
+        write_path="result.txt",
+        expected_content_sha256=digest,
+        expected_content_length=len(expected),
+    )
+    start_action_execution(conn, "exec-001")
+    finish_action_execution(
+        conn,
+        "exec-001",
+        status="uncertain",
+        error_type="ProcessInterrupted",
+    )
+
+    wrong_digest = hashlib.sha256(b"incorrect").hexdigest()
+    assert mark_uncertain_write_verified(
+        conn, "exec-001", wrong_digest, len(b"incorrect"), "verification-run"
+    ) is False
+    assert len(get_unresolved_uncertain_writes(conn)) == 1
+
+    assert mark_uncertain_write_verified(
+        conn, "exec-001", digest, len(expected), "verification-run"
+    ) is True
+
+    row = get_action_execution(conn, "exec-001")
+    assert row["status"] == "uncertain"
+    assert row["write_verified_at"] is not None
+    assert row["write_observed_sha256"] == digest
+    assert row["write_observed_length"] == len(expected)
+    assert row["write_verification_run_id"] == "verification-run"
+    assert get_unresolved_uncertain_writes(conn) == []
+    conn.close()
+
+def test_successful_newer_write_supersedes_older_uncertain_write(tmp_path):
+    from nova.memory.db import (
+        get_unresolved_uncertain_writes,
+        supersede_uncertain_writes,
+    )
+
+    conn = connect(tmp_path / "journal.db")
+    old_content = b"old version"
+    new_content = b"new version"
+
+    _create(
+        conn,
+        execution_id="exec-old",
+        run_id="run-old",
+        step=0,
+        action_name="write_file",
+        effect="write",
+        idempotency_key="run-old:0",
+        write_path="result.txt",
+        expected_content_sha256=hashlib.sha256(old_content).hexdigest(),
+        expected_content_length=len(old_content),
+    )
+    start_action_execution(conn, "exec-old")
+    finish_action_execution(
+        conn, "exec-old", status="uncertain", error_type="OSError"
+    )
+
+    _create(
+        conn,
+        execution_id="exec-new",
+        run_id="run-new",
+        step=0,
+        action_name="write_file",
+        effect="write",
+        idempotency_key="run-new:0",
+        write_path="result.txt",
+        expected_content_sha256=hashlib.sha256(new_content).hexdigest(),
+        expected_content_length=len(new_content),
+    )
+    start_action_execution(conn, "exec-new")
+    finish_action_execution(
+        conn,
+        "exec-new",
+        status="succeeded",
+        result_sha256=hashlib.sha256(b"wrote result.txt").hexdigest(),
+        result_length=len(b"wrote result.txt"),
+    )
+
+    # Equal timestamps across runs must still use journal insertion order.
+    conn.execute(
+        "UPDATE action_executions SET created_at = 'same-timestamp'"
+    )
+    conn.commit()
+
+    superseded = supersede_uncertain_writes(conn, "result.txt", "exec-new")
+    old_row = get_action_execution(conn, "exec-old")
+
+    assert superseded == ["exec-old"]
+    assert old_row["status"] == "uncertain"
+    assert old_row["write_superseded_at"] is not None
+    assert old_row["write_superseded_by_execution_id"] == "exec-new"
+    assert get_unresolved_uncertain_writes(conn) == []
+    conn.close()
+
+def test_startup_reconciles_supersession_after_confirmed_write(tmp_path):
+    from nova.memory.db import (
+        get_unresolved_uncertain_writes,
+        recover_superseded_uncertain_writes,
+    )
+
+    conn = connect(tmp_path / "journal.db")
+    content = b"latest content"
+    digest = hashlib.sha256(content).hexdigest()
+
+    _create(
+        conn,
+        execution_id="old-write",
+        run_id="old-run",
+        step=0,
+        action_name="write_file",
+        effect="write",
+        idempotency_key="old-run:0",
+        write_path="result.txt",
+        expected_content_sha256=hashlib.sha256(b"old").hexdigest(),
+        expected_content_length=3,
+    )
+    start_action_execution(conn, "old-write")
+    finish_action_execution(
+        conn, "old-write", status="uncertain", error_type="OSError"
+    )
+
+    _create(
+        conn,
+        execution_id="confirmed-write",
+        run_id="new-run",
+        step=0,
+        action_name="write_file",
+        effect="write",
+        idempotency_key="new-run:0",
+        write_path="result.txt",
+        expected_content_sha256=digest,
+        expected_content_length=len(content),
+    )
+    start_action_execution(conn, "confirmed-write")
+    finish_action_execution(
+        conn,
+        "confirmed-write",
+        status="succeeded",
+        result_sha256=hashlib.sha256(b"write result").hexdigest(),
+        result_length=len(b"write result"),
+    )
+
+    conn.execute(
+        "UPDATE action_executions SET created_at = 'same-timestamp'"
+    )
+    conn.commit()
+
+    assert recover_superseded_uncertain_writes(conn) == ["old-write"]
+    old = get_action_execution(conn, "old-write")
+    assert old["status"] == "uncertain"
+    assert old["write_superseded_by_execution_id"] == "confirmed-write"
+    assert get_unresolved_uncertain_writes(conn) == []
+    assert recover_superseded_uncertain_writes(conn) == []
+    conn.close()

@@ -62,6 +62,15 @@ CREATE TABLE IF NOT EXISTS action_executions (
     created_at TEXT NOT NULL,
     started_at TEXT,
     finished_at TEXT,
+    write_path TEXT,
+    expected_content_sha256 TEXT,
+    expected_content_length INTEGER,
+    write_verified_at TEXT,
+    write_observed_sha256 TEXT,
+    write_observed_length INTEGER,
+    write_verification_run_id TEXT,
+    write_superseded_at TEXT,
+    write_superseded_by_execution_id TEXT,
     UNIQUE(run_id, step)
 );
 
@@ -104,6 +113,27 @@ def connect(db_path: Path) -> sqlite3.Connection:
     )
     _ensure_column(conn, "runs", "finished_at", "TEXT")
     _ensure_column(conn, "runs", "error_type", "TEXT")
+    _ensure_column(conn, "action_executions", "write_path", "TEXT")
+    _ensure_column(
+        conn, "action_executions", "expected_content_sha256", "TEXT"
+    )
+    _ensure_column(
+        conn, "action_executions", "expected_content_length", "INTEGER"
+    )
+    _ensure_column(conn, "action_executions", "write_verified_at", "TEXT")
+    _ensure_column(
+        conn, "action_executions", "write_observed_sha256", "TEXT"
+    )
+    _ensure_column(
+        conn, "action_executions", "write_observed_length", "INTEGER"
+    )
+    _ensure_column(
+        conn, "action_executions", "write_verification_run_id", "TEXT"
+    )
+    _ensure_column(conn, "action_executions", "write_superseded_at", "TEXT")
+    _ensure_column(
+        conn, "action_executions", "write_superseded_by_execution_id", "TEXT"
+    )
 
     return conn
 
@@ -134,6 +164,9 @@ def create_action_execution(
     idempotency_key: str,
     request_summary: str,
     request_sha256: str,
+    write_path: str | None = None,
+    expected_content_sha256: str | None = None,
+    expected_content_length: int | None = None,
 ) -> None:
     """Durably record an action intent before any tool side effect."""
     if not isinstance(step, int) or isinstance(step, bool) or step < 0:
@@ -155,20 +188,55 @@ def create_action_execution(
 
     _validate_sha256(request_sha256, "request_sha256")
 
+    write_metadata = (
+        write_path,
+        expected_content_sha256,
+        expected_content_length,
+    )
+    if any(value is not None for value in write_metadata):
+        if not all(value is not None for value in write_metadata):
+            raise ValueError("Write verification metadata must be complete.")
+        if action_name != "write_file" or effect != "write":
+            raise ValueError("Write verification metadata requires write_file.")
+        if (
+            not isinstance(write_path, str)
+            or not write_path
+            or write_path.startswith("/")
+            or "\\" in write_path
+            or any(part in {"", ".", ".."} for part in write_path.split("/"))
+        ):
+            raise ValueError("write_path must be a normalized relative path.")
+        _validate_sha256(
+            expected_content_sha256,
+            "expected_content_sha256",
+        )
+        if (
+            not isinstance(expected_content_length, int)
+            or isinstance(expected_content_length, bool)
+            or expected_content_length < 0
+        ):
+            raise ValueError(
+                "expected_content_length must be a non-negative integer."
+            )
+
     try:
         conn.execute(
             """
             INSERT INTO action_executions (
                 execution_id, run_id, step, action_name, effect,
                 idempotency_key, request_summary, request_sha256,
-                status, created_at
+                status, created_at, write_path, expected_content_sha256,
+                expected_content_length
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?, ?)
             """,
             (
                 execution_id, run_id, step, action_name, effect,
                 idempotency_key, request_summary, request_sha256,
                 _journal_timestamp(),
+                write_path,
+                expected_content_sha256,
+                expected_content_length,
             ),
         )
         conn.commit()
@@ -261,6 +329,201 @@ def get_action_execution(
         (execution_id,),
     ).fetchone()
 
+
+
+
+def get_unresolved_uncertain_writes(
+    conn: sqlite3.Connection,
+) -> list[sqlite3.Row]:
+    """Return uncertain write intents that have not been verified."""
+    return conn.execute(
+        """
+        SELECT execution_id, run_id, write_path,
+               expected_content_sha256, expected_content_length
+        FROM action_executions
+        WHERE action_name = 'write_file'
+          AND effect = 'write'
+          AND status = 'uncertain'
+          AND write_verified_at IS NULL
+          AND write_superseded_at IS NULL
+        ORDER BY rowid
+        """
+    ).fetchall()
+
+
+def mark_uncertain_write_verified(
+    conn: sqlite3.Connection,
+    execution_id: str,
+    observed_sha256: str,
+    observed_length: int,
+    verification_run_id: str,
+) -> bool:
+    """Persist exact readback verification without changing action outcome."""
+    _validate_sha256(observed_sha256, "observed_sha256")
+    if (
+        not isinstance(observed_length, int)
+        or isinstance(observed_length, bool)
+        or observed_length < 0
+    ):
+        raise ValueError("observed_length must be a non-negative integer.")
+    if not isinstance(verification_run_id, str) or not verification_run_id.strip():
+        raise ValueError("verification_run_id must not be empty.")
+
+    cursor = conn.execute(
+        """
+        UPDATE action_executions
+        SET write_verified_at = ?,
+            write_observed_sha256 = ?,
+            write_observed_length = ?,
+            write_verification_run_id = ?
+        WHERE execution_id = ?
+          AND action_name = 'write_file'
+          AND effect = 'write'
+          AND status = 'uncertain'
+          AND write_verified_at IS NULL
+          AND write_superseded_at IS NULL
+          AND expected_content_sha256 = ?
+          AND expected_content_length = ?
+        """,
+        (
+            _journal_timestamp(),
+            observed_sha256,
+            observed_length,
+            verification_run_id,
+            execution_id,
+            observed_sha256,
+            observed_length,
+        ),
+    )
+    conn.commit()
+    return cursor.rowcount == 1
+
+
+
+def supersede_uncertain_writes(
+    conn: sqlite3.Connection,
+    write_path: str,
+    superseding_execution_id: str,
+) -> list[str]:
+    """Supersede older uncertain writes after a newer full write is confirmed."""
+    if not isinstance(write_path, str) or not write_path.strip():
+        raise ValueError("write_path must not be empty.")
+    if (
+        write_path.startswith("/")
+        or "\\" in write_path
+        or any(part in {"", ".", ".."} for part in write_path.split("/"))
+    ):
+        raise ValueError("write_path must be normalized and workspace-relative.")
+    if not isinstance(superseding_execution_id, str) or not superseding_execution_id.strip():
+        raise ValueError("superseding_execution_id must not be empty.")
+
+    current = conn.execute(
+        """
+        SELECT rowid AS journal_order, action_name, effect, status,
+               write_path, write_verified_at
+        FROM action_executions
+        WHERE execution_id = ?
+        """,
+        (superseding_execution_id,),
+    ).fetchone()
+
+    if (
+        current is None
+        or current["action_name"] != "write_file"
+        or current["effect"] != "write"
+        or current["write_path"] != write_path
+        or not (
+            current["status"] == "succeeded"
+            or (
+                current["status"] == "uncertain"
+                and current["write_verified_at"] is not None
+            )
+        )
+    ):
+        raise ValueError(
+            "Superseding action must be a successful or verified write "
+            "for the same path."
+        )
+
+    ordering = " AND rowid < ?"
+    params = (
+        write_path,
+        superseding_execution_id,
+        current["journal_order"],
+    )
+
+    rows = conn.execute(
+        """
+        SELECT execution_id
+        FROM action_executions
+        WHERE action_name = 'write_file'
+          AND effect = 'write'
+          AND status = 'uncertain'
+          AND write_path = ?
+          AND write_verified_at IS NULL
+          AND write_superseded_at IS NULL
+          AND execution_id != ?
+        """ + ordering + """
+        ORDER BY rowid
+        """,
+        params,
+    ).fetchall()
+
+    ids = [row["execution_id"] for row in rows]
+    if not ids:
+        return []
+
+    conn.execute(
+        """
+        UPDATE action_executions
+        SET write_superseded_at = ?,
+            write_superseded_by_execution_id = ?
+        WHERE action_name = 'write_file'
+          AND effect = 'write'
+          AND status = 'uncertain'
+          AND write_path = ?
+          AND write_verified_at IS NULL
+          AND write_superseded_at IS NULL
+          AND execution_id != ?
+        """ + ordering,
+        (_journal_timestamp(), superseding_execution_id) + params,
+    )
+    conn.commit()
+    return ids
+
+
+
+
+def recover_superseded_uncertain_writes(
+    conn: sqlite3.Connection,
+) -> list[str]:
+    """Reconcile older uncertainty against durable later confirmed writes."""
+    confirmed = conn.execute(
+        """
+        SELECT execution_id, write_path
+        FROM action_executions
+        WHERE action_name = 'write_file'
+          AND effect = 'write'
+          AND write_path IS NOT NULL
+          AND (
+              status = 'succeeded'
+              OR (status = 'uncertain' AND write_verified_at IS NOT NULL)
+          )
+        ORDER BY rowid
+        """
+    ).fetchall()
+
+    superseded_ids = []
+    for row in confirmed:
+        superseded_ids.extend(
+            supersede_uncertain_writes(
+                conn,
+                row["write_path"],
+                row["execution_id"],
+            )
+        )
+
+    return superseded_ids
 
 
 def recover_interrupted_actions(
