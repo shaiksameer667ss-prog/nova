@@ -316,3 +316,213 @@ def test_run_behavioral_probe_rejects_drifted_probe_before_sandbox():
     drifted2["symbol"] = ""
     with pytest.raises(BehavioralProbeError, match="Invalid behavioral probe fields"):
         run_behavioral_probe(observed, drifted2)
+
+RETRYING_SOURCE = """def call_with_retry(
+    operation,
+    *,
+    max_attempts=3,
+    retry_on=(TimeoutError,),
+    base_delay=0.1,
+):
+    return operation()
+"""
+
+
+def test_keyword_only_arguments_must_be_passed_in_kwargs():
+    probe = {
+        "kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "args": ["operation", 3, ["TimeoutError"], 0.1],
+        "kwargs": {},
+        "expected_result": None,
+        "expected_exception": None,
+    }
+
+    with pytest.raises(BehavioralProbeError, match="keyword-only"):
+        validate_behavioral_probe({"retrying.py": RETRYING_SOURCE}, probe)
+
+
+def test_keyword_only_arguments_are_valid_in_kwargs():
+    probe = {
+        "kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "args": ["operation"],
+        "kwargs": {
+            "max_attempts": 3,
+            "retry_on": ["TimeoutError"],
+            "base_delay": 0.1,
+        },
+        "expected_result": None,
+        "expected_exception": None,
+    }
+
+    normalized = validate_behavioral_probe(
+        {"retrying.py": RETRYING_SOURCE}, probe
+    )
+
+    assert normalized["args"] == ["operation"]
+    assert normalized["kwargs"] == probe["kwargs"]
+
+
+def test_probe_rejects_duplicate_positional_and_keyword_argument():
+    probe = {
+        "kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "args": ["operation"],
+        "kwargs": {"operation": "another-operation"},
+        "expected_result": None,
+        "expected_exception": None,
+    }
+
+    with pytest.raises(BehavioralProbeError, match="more than once"):
+        validate_behavioral_probe({"retrying.py": RETRYING_SOURCE}, probe)
+
+
+def test_probe_rejects_missing_required_arguments():
+    source = """def combine(first, second):
+    return first + second
+"""
+    probe = {
+        "kind": "function_call",
+        "path": "combine.py",
+        "function": "combine",
+        "args": ["one"],
+        "kwargs": {},
+        "expected_result": None,
+        "expected_exception": None,
+    }
+
+    with pytest.raises(BehavioralProbeError, match="missing required"):
+        validate_behavioral_probe({"combine.py": source}, probe)
+
+
+def test_retry_probe_accepts_allowlisted_runtime_descriptors():
+    probe = {
+        "kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "args": [{
+            "$nova_probe": "callable",
+            "behavior": "return",
+            "value": 42,
+        }],
+        "kwargs": {
+            "max_attempts": True,
+            "retry_on": {
+                "$nova_probe": "exception_types",
+                "items": ["TimeoutError"],
+            },
+            "base_delay": 0.1,
+        },
+        "expected_result": 42,
+        "expected_exception": None,
+    }
+
+    normalized = validate_behavioral_probe(
+        {"retrying.py": RETRYING_SOURCE},
+        probe,
+    )
+
+    assert normalized["args"] == probe["args"]
+    assert normalized["kwargs"] == probe["kwargs"]
+
+
+def test_retry_probe_accepts_allowlisted_raising_callback():
+    probe = {
+        "kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "args": [{
+            "$nova_probe": "callable",
+            "behavior": "raise",
+            "exception_type": "TimeoutError",
+            "message": "temporary failure",
+        }],
+        "kwargs": {
+            "max_attempts": 2,
+            "retry_on": {
+                "$nova_probe": "exception_types",
+                "items": ["TimeoutError", "ConnectionError"],
+            },
+            "base_delay": 0,
+        },
+        "expected_result": None,
+        "expected_exception": {
+            "type": "TimeoutError",
+            "message": "temporary failure",
+        },
+    }
+
+    normalized = validate_behavioral_probe(
+        {"retrying.py": RETRYING_SOURCE},
+        probe,
+    )
+
+    assert normalized["args"] == probe["args"]
+    assert normalized["kwargs"] == probe["kwargs"]
+
+
+def test_probe_rejects_unallowlisted_exception_descriptor():
+    probe = {
+        "kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "args": [{
+            "$nova_probe": "callable",
+            "behavior": "raise",
+            "exception_type": "Path",
+            "message": "not allowed",
+        }],
+        "kwargs": {
+            "retry_on": {
+                "$nova_probe": "exception_types",
+                "items": ["TimeoutError"],
+            },
+        },
+        "expected_result": None,
+        "expected_exception": None,
+    }
+
+    with pytest.raises(BehavioralProbeError, match="callable exception"):
+        validate_behavioral_probe({"retrying.py": RETRYING_SOURCE}, probe)
+
+
+def test_probe_rejects_unknown_runtime_descriptor():
+    probe = {
+        "kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "args": [{"$nova_probe": "arbitrary_code", "code": "print(1)"}],
+        "kwargs": {},
+        "expected_result": None,
+        "expected_exception": None,
+    }
+
+    with pytest.raises(BehavioralProbeError, match="Unknown probe value"):
+        validate_behavioral_probe({"retrying.py": RETRYING_SOURCE}, probe)
+
+
+def test_probe_rejects_malformed_exception_types_descriptor():
+    probe = {
+        "kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "args": [{
+            "$nova_probe": "callable",
+            "behavior": "noop",
+        }],
+        "kwargs": {
+            "retry_on": {
+                "$nova_probe": "exception_types",
+                "items": ["TimeoutError", "Path"],
+            },
+        },
+        "expected_result": None,
+        "expected_exception": None,
+    }
+
+    with pytest.raises(BehavioralProbeError, match="unsupported names"):
+        validate_behavioral_probe({"retrying.py": RETRYING_SOURCE}, probe)

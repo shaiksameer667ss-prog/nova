@@ -296,7 +296,7 @@ def test_replan_includes_actual_capabilities_and_failure_evidence():
     assert "transient write failure" in context["failure_observation"]
     assert {
         item["action"] for item in context["available_actions"]
-    } == {"write_file", "read_file", "list_files", "done"}
+    } == {"write_file", "read_file", "list_files", "done", "generate_candidate"}
 
 
 def test_rendered_plan_context_includes_action_capabilities():

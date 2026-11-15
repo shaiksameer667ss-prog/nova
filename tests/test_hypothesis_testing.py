@@ -120,6 +120,29 @@ def test_response_schema_limits_paths_to_observations():
     ]
 
 
+def test_function_call_response_schema_fixes_metadata_fields():
+    from nova.controller.hypothesis_testing import (
+        build_hypothesis_response_format,
+    )
+
+    for task_id in (None, "cross_file_dependency_001"):
+        schema = build_hypothesis_response_format(
+            FILES,
+            benchmark_task_id=task_id,
+        )["json_schema"]["schema"]
+
+        probe = schema["properties"]["probe"]["properties"]
+        assert probe["kind"]["enum"] == ["function_call"]
+        assert probe["symbol"] == {
+            "type": "string",
+            "enum": [""],
+        }
+        assert probe["expected_present"] == {
+            "type": "boolean",
+            "enum": [False],
+        }
+
+
 def test_hypothesis_messages_include_observed_source():
     from nova.controller.hypothesis_testing import build_hypothesis_messages
 
@@ -802,3 +825,148 @@ def test_non_cfd001_typed_looking_argument_is_not_serialized():
     }
     normalized = parse_hypothesis(json.dumps(proposal), files)
     assert normalized["probe"]["args"] == [typed]
+
+
+def test_keyword_only_probe_is_rejected_as_probe_contract_error():
+    import json
+
+    from nova.controller.hypothesis_testing import (
+        ProbeContractError,
+        parse_hypothesis,
+    )
+
+    observed = {
+        "retrying.py": """def call_with_retry(
+    operation,
+    *,
+    max_attempts=3,
+    retry_on=(TimeoutError,),
+    base_delay=0.1,
+):
+    return operation()
+"""
+    }
+    args = ["operation", True, ["TimeoutError"], 0.1]
+    proposal = {
+        "hypothesis": "The function does not reject boolean max_attempts.",
+        "prediction": "The original function raises ZeroDivisionError.",
+        "probe": {
+            "kind": "function_call",
+            "path": "retrying.py",
+            "function": "call_with_retry",
+            "symbol": "",
+            "expected_present": False,
+            "args": args,
+            "kwargs": {},
+            "expected_result": None,
+            "expected_exception": {
+                "type": "ZeroDivisionError",
+                "message": "division by zero",
+            },
+        },
+    }
+
+    with pytest.raises(ProbeContractError, match="keyword-only") as caught:
+        parse_hypothesis(json.dumps(proposal), observed)
+
+    assert caught.value.probe_input["path"] == "retrying.py"
+    assert caught.value.probe_input["args"] == args
+
+
+def test_hypothesis_parser_preserves_typed_runtime_descriptors():
+    import json
+
+    from nova.controller.hypothesis_testing import parse_hypothesis
+
+    observed = {
+        "retrying.py": """def call_with_retry(
+    operation,
+    *,
+    max_attempts=3,
+    retry_on=(TimeoutError,),
+    base_delay=0.1,
+    sleep=None,
+):
+    return operation()
+"""
+    }
+
+    callback = {
+        "$nova_probe": "callable",
+        "behavior": "return",
+        "value": 42,
+    }
+    exception_types = {
+        "$nova_probe": "exception_types",
+        "items": ["TimeoutError", "ConnectionError"],
+    }
+    sleep_callback = {
+        "$nova_probe": "callable",
+        "behavior": "noop",
+    }
+
+    proposal = {
+        "hypothesis": "The helper accepts boolean attempt counts.",
+        "prediction": "The unchanged helper returns 42.",
+        "probe": {
+            "kind": "function_call",
+            "path": "retrying.py",
+            "function": "call_with_retry",
+            "symbol": "",
+            "expected_present": False,
+            "args": [callback],
+            "kwargs": {
+                "max_attempts": True,
+                "retry_on": exception_types,
+                "base_delay": 0.1,
+                "sleep": sleep_callback,
+            },
+            "expected_result": 42,
+            "expected_exception": None,
+        },
+    }
+
+    parsed = parse_hypothesis(json.dumps(proposal), observed)
+    assert parsed["probe"]["args"] == [callback]
+    assert parsed["probe"]["kwargs"] == {
+        "max_attempts": True,
+        "retry_on": exception_types,
+        "base_delay": 0.1,
+        "sleep": sleep_callback,
+    }
+
+def test_retry_control_flow_prompt_shows_callable_and_keyword_only_arguments():
+    import json
+
+    from nova.controller.hypothesis_testing import build_hypothesis_messages
+
+    observed = {
+        "retrying.py": (
+            "def call_with_retry(operation, *, max_attempts=3, "
+            "retry_on=(TimeoutError,), base_delay=0.1, sleep=None):\\n"
+            "    return operation()\\n"
+        )
+    }
+    messages = build_hypothesis_messages(
+        task="Repair retry attempt-count validation.",
+        proposed_action={"path": "retrying.py"},
+        observed_files=observed,
+        benchmark_task_id="retry_control_flow_002",
+    )
+
+    system = messages[0]["content"]
+    payload = json.loads(messages[1]["content"])
+    example = payload["retry_control_flow_probe_example"]
+
+    assert example["target"] == {
+        "path": "retrying.py",
+        "function": "call_with_retry",
+    }
+    assert example["cases"][0]["args"] == [
+        {"$nova_probe": "callable", "behavior": "noop"}
+    ]
+    assert example["cases"][0]["kwargs"] == {"max_attempts": "3"}
+    assert example["cases"][1]["kwargs"] == {"max_attempts": 1.5}
+    assert "operation is the first positional parameter" in system
+    assert "max_attempts is keyword-only" in system
+    assert "Never put 3, a string, or a float alone in args" in system

@@ -13,6 +13,30 @@ from typing import Any
 class BehavioralProbeError(ValueError):
     '''Invalid or unsuccessful behavioral probe.'''
 
+_PROBE_EXCEPTION_TYPE_NAMES = frozenset({
+    "ArithmeticError",
+    "AssertionError",
+    "ConnectionError",
+    "AttributeError",
+    "EOFError",
+    "Exception",
+    "ImportError",
+    "IndexError",
+    "KeyError",
+    "LookupError",
+    "NameError",
+    "NotImplementedError",
+    "OSError",
+    "OverflowError",
+    "RuntimeError",
+    "StopIteration",
+    "TimeoutError",
+    "TypeError",
+    "ValueError",
+    "ZeroDivisionError",
+})
+
+
 def _safe_path(value: Any) -> str:
     if not isinstance(value, str) or not value or '\\' in value or ':' in value or '\x00' in value:
         raise BehavioralProbeError('Invalid relative Python path.')
@@ -46,6 +70,103 @@ def _validate_json_value(value: Any, depth: int=0) -> None:
             _validate_json_value(item, depth + 1)
         return
     raise BehavioralProbeError('Probe values must be JSON-compatible.')
+
+
+def _validate_probe_value(value: Any, depth: int = 0) -> None:
+    """Validate JSON values plus the small allowlisted runtime descriptor set."""
+    if depth > 12:
+        raise BehavioralProbeError("Probe JSON nesting exceeds 12 levels.")
+
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise BehavioralProbeError("Probe numbers must be finite.")
+        return
+
+    if isinstance(value, list):
+        if len(value) > 256:
+            raise BehavioralProbeError("Probe array is too large.")
+        for item in value:
+            _validate_probe_value(item, depth + 1)
+        return
+
+    if isinstance(value, dict):
+        if len(value) > 256:
+            raise BehavioralProbeError("Probe object is too large.")
+
+        if "$nova_probe" in value:
+            descriptor = value.get("$nova_probe")
+
+            if descriptor == "callable":
+                behavior = value.get("behavior")
+
+                if behavior == "return" and set(value) == {
+                    "$nova_probe", "behavior", "value"
+                }:
+                    _validate_json_value(value["value"])
+                    return
+
+                if behavior == "raise" and set(value) == {
+                    "$nova_probe", "behavior", "exception_type", "message"
+                }:
+                    exception_type = value["exception_type"]
+                    message = value["message"]
+                    if (
+                        not isinstance(exception_type, str)
+                        or exception_type not in _PROBE_EXCEPTION_TYPE_NAMES
+                        or not isinstance(message, str)
+                        or len(message) > 1000
+                    ):
+                        raise BehavioralProbeError(
+                            "Invalid callable exception descriptor."
+                        )
+                    return
+
+                if behavior == "noop" and set(value) == {
+                    "$nova_probe", "behavior"
+                }:
+                    return
+
+                raise BehavioralProbeError(
+                    "Invalid callable probe descriptor."
+                )
+
+            if descriptor == "exception_types":
+                if set(value) != {"$nova_probe", "items"}:
+                    raise BehavioralProbeError(
+                        "Invalid exception_types probe descriptor."
+                    )
+                items = value["items"]
+                if (
+                    not isinstance(items, list)
+                    or not 1 <= len(items) <= 16
+                    or any(
+                        not isinstance(name, str)
+                        or name not in _PROBE_EXCEPTION_TYPE_NAMES
+                        for name in items
+                    )
+                    or len(set(items)) != len(items)
+                ):
+                    raise BehavioralProbeError(
+                        "Exception type descriptor contains unsupported names."
+                    )
+                return
+
+            raise BehavioralProbeError("Unknown probe value descriptor.")
+
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise BehavioralProbeError(
+                    "Probe object keys must be strings."
+                )
+            _validate_probe_value(item, depth + 1)
+        return
+
+    raise BehavioralProbeError(
+        "Probe values must be JSON-compatible or allowlisted descriptors."
+    )
 
 
 def serialize_typed_record(record_spec: Any) -> str:
@@ -95,6 +216,73 @@ def serialize_typed_record(record_spec: Any) -> str:
         serialized_fields.append(f"{key}={encoded_value}")
 
     return ";".join(serialized_fields)
+
+
+def _validate_call_signature(
+    function_node: ast.FunctionDef,
+    args: list[Any],
+    kwargs: dict[str, Any],
+) -> None:
+    """Reject behavioral probes that cannot bind to the observed signature."""
+    parameters = function_node.args
+    positional_parameters = [*parameters.posonlyargs, *parameters.args]
+    positional_names = {parameter.arg for parameter in positional_parameters}
+    positional_only_names = {parameter.arg for parameter in parameters.posonlyargs}
+    keyword_only_names = {parameter.arg for parameter in parameters.kwonlyargs}
+
+    if len(args) > len(positional_parameters) and parameters.vararg is None:
+        if parameters.kwonlyargs:
+            raise BehavioralProbeError(
+                "Probe passes too many positional arguments. Parameters after "
+                "* are keyword-only and must be supplied in kwargs."
+            )
+        raise BehavioralProbeError(
+            "Probe supplies too many positional arguments for the observed function."
+        )
+
+    bound_names = {
+        parameter.arg for parameter in positional_parameters[:len(args)]
+    }
+    accepts_extra_keywords = parameters.kwarg is not None
+
+    for name in kwargs:
+        if name in positional_only_names:
+            if not accepts_extra_keywords:
+                raise BehavioralProbeError(
+                    f"Probe passes positional-only parameter {name!r} as a keyword."
+                )
+            continue
+
+        if name in bound_names:
+            raise BehavioralProbeError(
+                f"Probe supplies parameter {name!r} more than once."
+            )
+
+        if name in positional_names or name in keyword_only_names:
+            bound_names.add(name)
+        elif not accepts_extra_keywords:
+            raise BehavioralProbeError(
+                f"Probe supplies unexpected keyword argument {name!r}."
+            )
+
+    positional_defaults = len(parameters.defaults)
+    required_positional = positional_parameters[
+        :len(positional_parameters) - positional_defaults
+    ]
+    missing = [
+        parameter.arg
+        for parameter in required_positional
+        if parameter.arg not in bound_names
+    ]
+
+    for parameter, default in zip(parameters.kwonlyargs, parameters.kw_defaults):
+        if default is None and parameter.arg not in kwargs:
+            missing.append(parameter.arg)
+
+    if missing:
+        raise BehavioralProbeError(
+            "Probe is missing required argument(s): " + ", ".join(missing)
+        )
 
 
 def validate_behavioral_probe(
@@ -174,8 +362,8 @@ def validate_behavioral_probe(
     ):
         raise BehavioralProbeError("Invalid keyword argument name.")
 
-    _validate_json_value(args)
-    _validate_json_value(kwargs)
+    _validate_probe_value(args)
+    _validate_probe_value(kwargs)
     _validate_json_value(probe["expected_result"])
 
     files: dict[str, str] = {}
@@ -202,13 +390,20 @@ def validate_behavioral_probe(
             f"Observed source has invalid syntax: {exc.msg}"
         ) from exc
 
-    if not any(
-        isinstance(node, ast.FunctionDef) and node.name == function
-        for node in tree.body
-    ):
+    function_node = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == function
+        ),
+        None,
+    )
+    if function_node is None:
         raise BehavioralProbeError(
             "Requested public synchronous function was not found."
         )
+
+    _validate_call_signature(function_node, args, kwargs)
 
     normalized = {
         "kind": "function_call",
@@ -227,7 +422,7 @@ def validate_behavioral_probe(
         raise BehavioralProbeError("Complete probe payload exceeds 30 KiB.")
     return normalized
 
-_CONTAINER_HARNESS = '\nimport contextlib\nimport importlib.util\nimport io\nimport json\nimport sys\nfrom pathlib import Path\n\nsys.dont_write_bytecode = True\nroot = Path("/workspace").resolve()\nprobe = json.loads((root / "_nova_probe.json").read_text(encoding="utf-8"))\ntarget = (root / probe["path"]).resolve()\n\nif not target.is_relative_to(root) or not target.is_file():\n    raise RuntimeError("Probe target is outside the staged workspace")\n\nsys.path.insert(0, str(root))\nsys.path.insert(0, str(target.parent))\ncaptured = io.StringIO()\n\ntry:\n    with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):\n        spec = importlib.util.spec_from_file_location(\n            "_nova_observed_module", target\n        )\n        if spec is None or spec.loader is None:\n            raise ImportError("Could not load observed module")\n        module = importlib.util.module_from_spec(spec)\n        sys.modules[spec.name] = module\n        spec.loader.exec_module(module)\n        function = getattr(module, probe["function"], None)\n        if not callable(function):\n            raise AttributeError("Requested function is not callable")\nexcept Exception as exc:\n    execution = {\n        "harness_ok": False,\n        "harness_error_type": type(exc).__name__,\n        "harness_error": str(exc)[:1000],\n    }\nelse:\n    try:\n        with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):\n            actual = function(*probe["args"], **probe["kwargs"])\n            actual = json.loads(json.dumps(\n                actual, ensure_ascii=False, allow_nan=False\n            ))\n        execution = {"harness_ok": True, "actual": actual}\n    except Exception as exc:\n        execution = {\n            "harness_ok": True,\n            "raised": {\n                "type": type(exc).__name__,\n                "message": str(exc)[:1000],\n            },\n        }\n\nexecution["captured_output"] = captured.getvalue()[:3000]\nprint("NOVA_BHT_FUNCTION_RESULT:" + json.dumps(execution, ensure_ascii=False))\n'
+_CONTAINER_HARNESS = '\nimport builtins\nimport contextlib\nimport importlib.util\nimport io\nimport json\nimport sys\nfrom pathlib import Path\n\nsys.dont_write_bytecode = True\nroot = Path("/workspace").resolve()\nprobe = json.loads((root / "_nova_probe.json").read_text(encoding="utf-8"))\n\n_ALLOWED_PROBE_EXCEPTION_NAMES = {\n    "ArithmeticError", "AssertionError", "ConnectionError", "AttributeError", "EOFError",\n    "Exception", "ImportError", "IndexError", "KeyError", "LookupError",\n    "NameError", "NotImplementedError", "OSError", "OverflowError",\n    "RuntimeError", "StopIteration", "TimeoutError", "TypeError",\n    "ValueError", "ZeroDivisionError",\n}\n_ALLOWED_PROBE_EXCEPTIONS = {\n    name: getattr(builtins, name)\n    for name in _ALLOWED_PROBE_EXCEPTION_NAMES\n}\n\n\ndef _resolve_probe_value(value):\n    if isinstance(value, list):\n        return [_resolve_probe_value(item) for item in value]\n\n    if not isinstance(value, dict):\n        return value\n\n    descriptor = value.get("$nova_probe")\n\n    if descriptor == "exception_types":\n        return tuple(\n            _ALLOWED_PROBE_EXCEPTIONS[name]\n            for name in value["items"]\n        )\n\n    if descriptor == "callable":\n        behavior = value["behavior"]\n\n        if behavior == "return":\n            result = value["value"]\n\n            def callback(*_args, **_kwargs):\n                return result\n\n            return callback\n\n        if behavior == "raise":\n            exception_class = _ALLOWED_PROBE_EXCEPTIONS[\n                value["exception_type"]\n            ]\n            message = value["message"]\n\n            def callback(*_args, **_kwargs):\n                raise exception_class(message)\n\n            return callback\n\n        if behavior == "noop":\n            def callback(*_args, **_kwargs):\n                return None\n\n            return callback\n\n        raise ValueError("Unsupported callable probe descriptor")\n\n    return {\n        key: _resolve_probe_value(item)\n        for key, item in value.items()\n    }\n\n\ntarget = (root / probe["path"]).resolve()\n\nif not target.is_relative_to(root) or not target.is_file():\n    raise RuntimeError("Probe target is outside the staged workspace")\n\nsys.path.insert(0, str(root))\nsys.path.insert(0, str(target.parent))\ncaptured = io.StringIO()\n\ntry:\n    with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):\n        spec = importlib.util.spec_from_file_location(\n            "_nova_observed_module", target\n        )\n        if spec is None or spec.loader is None:\n            raise ImportError("Could not load observed module")\n        module = importlib.util.module_from_spec(spec)\n        sys.modules[spec.name] = module\n        spec.loader.exec_module(module)\n        function = getattr(module, probe["function"], None)\n        if not callable(function):\n            raise AttributeError("Requested function is not callable")\nexcept Exception as exc:\n    execution = {\n        "harness_ok": False,\n        "harness_error_type": type(exc).__name__,\n        "harness_error": str(exc)[:1000],\n    }\nelse:\n    try:\n        with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):\n            call_args = _resolve_probe_value(probe["args"])\n            call_kwargs = _resolve_probe_value(probe["kwargs"])\n            actual = function(*call_args, **call_kwargs)\n            actual = json.loads(json.dumps(\n                actual, ensure_ascii=False, allow_nan=False\n            ))\n        execution = {"harness_ok": True, "actual": actual}\n    except Exception as exc:\n        execution = {\n            "harness_ok": True,\n            "raised": {\n                "type": type(exc).__name__,\n                "message": str(exc)[:1000],\n            },\n        }\n\nexecution["captured_output"] = captured.getvalue()[:3000]\nprint("NOVA_BHT_FUNCTION_RESULT:" + json.dumps(execution, ensure_ascii=False))\n'
 _WSL_BOOTSTRAP = '\nimport json\nimport sys\nimport tempfile\nfrom pathlib import Path\n\nMARKER = "NOVA_BHT_RESULT:"\n\ntry:\n    sys.dont_write_bytecode = True\n    source_root = sys.argv[1]\n    sys.path.insert(0, source_root)\n\n    from nova.tools.docker_sandbox import DockerSandboxRunner, SandboxLimits\n\n    payload = json.load(sys.stdin)\n    root = Path.home() / "nova-eval-lab" / "workspaces"\n    root.mkdir(parents=True, exist_ok=True)\n\n    with tempfile.TemporaryDirectory(prefix="nova-bht-", dir=root) as temp:\n        workspace = Path(temp).resolve()\n\n        for relative, source in payload["observed_python_files"].items():\n            target = (workspace / relative).resolve()\n            if not target.is_relative_to(workspace):\n                raise ValueError("Unsafe staged source path")\n            target.parent.mkdir(parents=True, exist_ok=True)\n            target.write_text(source, encoding="utf-8")\n            target.chmod(0o644)\n\n        (workspace / "_nova_probe.json").write_text(\n            json.dumps(payload["probe"], ensure_ascii=False, allow_nan=False),\n            encoding="utf-8",\n        )\n        (workspace / "_nova_behavior_probe.py").write_text(\n            payload["harness"], encoding="utf-8"\n        )\n\n        for item in workspace.rglob("*"):\n            if item.is_dir():\n                item.chmod(0o755)\n        workspace.chmod(0o755)\n\n        runner = DockerSandboxRunner(\n            root,\n            limits=SandboxLimits(\n                timeout_seconds=8,\n                max_output_bytes=65536,\n            ),\n        )\n        result = runner.run(\n            workspace,\n            ["python", "-B", "_nova_behavior_probe.py"],\n            timeout_seconds=8,\n        )\n\n        response = {\n            "sandbox_succeeded": result.succeeded,\n            "exit_code": result.exit_code,\n            "stdout": result.stdout,\n            "stderr": result.stderr[:3000],\n            "timed_out": result.timed_out,\n            "output_limited": result.output_limited,\n            "duration_seconds": result.duration_seconds,\n        }\n        print(MARKER + json.dumps(response, ensure_ascii=False))\nexcept Exception as exc:\n    print(MARKER + json.dumps({\n        "bridge_error": type(exc).__name__ + ": " + str(exc)\n    }, ensure_ascii=False))\n'
 
 def run_behavioral_probe(observed_files: dict[str, str], probe: dict[str, Any], source_root: Path | None=None, *, wsl_distribution: str='Ubuntu-24.04') -> dict[str, Any]:

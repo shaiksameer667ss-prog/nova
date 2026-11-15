@@ -1658,3 +1658,546 @@ All artifacts preserved:
 - Adapter SHA: `59366286026e…` (v6 candidate)
 - `loop.py` SHA at run time: `86b71324fa1913870aec4f0a0567ecdb51b5e59708bdec429a7e251b6e1c7f59`
 
+
+## Finding H: Internal preflight with 4B controller (2026-11-14)
+
+**Result: PASS — independent hidden-test verification.**
+
+NOVA completed CFD001 using an internal candidate-generation preflight followed by the `qwen3.5:4b` controller.
+
+- Run ID: `a51b1c2c-49a1-418c-b7fb-24e695d2a395`
+- Controller: `qwen3.5:4b`
+- Candidate generator: `Qwen/Qwen2.5-Coder-7B-Instruct`
+- Adapter: `qwen25-coder-7b-v6`
+- Adapter SHA256: `833a75153e5cce9b92c90c15d9d7565f5efe4ce90db191166283312f3a4a5a3d`
+- Selected candidate: V6
+- Candidate SHA256: `59366286026e0ff7b77ee1ab65f989231462a79b143accf1c04280270cd269fe`
+- Prompt SHA256: `00bf10c6a10654934e2f5eee711ce6f69b350dae6e0bf5ac3224c2564d23ed6e`
+- BASE evaluation: 11/11; parity sweep N=0..12 passed.
+- V6 evaluation: 11/11; parity sweep N=0..12 passed.
+- Controller result: completed, 5 steps, 18.23 seconds.
+- Final workspace `tokenizer.py` SHA256 exactly matched the selected candidate.
+- Original `parser.py` remained unchanged: `030E8B9B269DE4DF50A217926C189B61F4C9161E49E57A3737AA2565CF15C4A6`.
+- Independent CFD001 hidden tests: 6/6 passed.
+
+The SQLite episode persisted the `candidate_preflight` event and candidate provenance. The recorded step 2 shows `pre_candidate_dispatched=true` and `pre_candidate_substituted=true`: the proposed action preview targeted `parser.py`, while the executed action wrote the internally selected candidate to `tokenizer.py`.
+
+The controller's final natural-language summary incorrectly claimed that `parser.py` had been fixed using a manual parser. The verified artifact was instead the generated `tokenizer.py` candidate. This is a concrete limitation of the model's self-reporting when NOVA substitutes a pre-selected candidate.
+
+Evidence database:
+`C:\Users\Shahid\Downloads\nova\data\nova-cfd001-live-20261114-144144.sqlite3`
+
+Evidence bridge trial:
+`C:\Users\Shahid\nova-eval-lab\bridge-candidate-20261114-144427-36736`
+
+This establishes internal preflight integration with a 4B controller on CFD001. It does not establish generalization to other benchmark tasks.
+
+## Finding I: Internal preflight with 9B controller (2026-11-14)
+
+**Result: PASS — independent hidden-test verification.**
+
+The same CFD001 workflow completed with `qwen3.5:9b-8k` as the controller. Candidate generation remained internal and used the same 7B BASE+V6 bridge.
+
+- Run ID: `372a1bc9-926a-43b2-ae31-ec2a5dd0e2cf`
+- Controller: `qwen3.5:9b-8k`
+- Candidate generator: `Qwen/Qwen2.5-Coder-7B-Instruct`
+- Adapter: `qwen25-coder-7b-v6`
+- Adapter SHA256: `833a75153e5cce9b92c90c15d9d7565f5efe4ce90db191166283312f3a4a5a3d`
+- Selected candidate: V6
+- Candidate SHA256: `59366286026e0ff7b77ee1ab65f989231462a79b143accf1c04280270cd269fe`
+- Prompt SHA256: `00bf10c6a10654934e2f5eee711ce6f69b350dae6e0bf5ac3224c2564d23ed6e`
+- BASE evaluation: 11/11; parity sweep N=0..12 passed.
+- V6 evaluation: 11/11; parity sweep N=0..12 passed.
+- Controller result: completed, 5 steps, 28.45 seconds.
+- Final workspace `tokenizer.py` SHA256 exactly matched the selected candidate.
+- Original `parser.py` remained unchanged: `030E8B9B269DE4DF50A217926C189B61F4C9161E49E57A3737AA2565CF15C4A6`.
+- Independent CFD001 hidden tests: 6/6 passed.
+
+The SQLite episode persisted the successful candidate-preflight event, provenance, and action-substitution flags. The executed step wrote the selected `tokenizer.py` candidate. The model-proposed-action preview was unparseable, so the original proposed target cannot be established from that preview.
+
+The GPU handoff completed before bridge generation. After the controller run, Ollama reported the 9B model at approximately 12% CPU / 88% GPU, using 6.4 GB. This demonstrates sequential bridge/controller orchestration with CPU/GPU offloading, not simultaneous GPU residency of both models.
+
+Evidence database:
+`C:\Users\Shahid\nova-eval-lab\cfd001-9b-live-20261114-145745\nova.sqlite3`
+
+Evidence bridge trial:
+`C:\Users\Shahid\nova-eval-lab\bridge-candidate-20261114-145951-36440`
+
+This is the strongest demonstrated internal-preflight integration result so far. It establishes the workflow with both 4B and 9B controllers on CFD001, but does not establish performance on a second benchmark or prove trustworthy model self-reporting.
+
+### Finding I handoff and interpretation clarifications
+
+**GPU handoff status**
+
+The persisted `candidate_preflight` event records:
+
+- `gpu_handoff.status`: `already_unloaded`
+- `gpu_handoff.model`: `qwen3.5:9b-8k`
+
+The pre-run `ollama ps` output was empty. The handoff guard therefore confirmed that the 9B controller was not resident before bridge generation. It did not need to invoke `ollama stop`, so this experiment does not test stopping an already-resident 9B model.
+
+After controller inference, Ollama reported approximately 12% CPU / 88% GPU utilization and 6.4 GB model residency. This demonstrates 9B inference with CPU/GPU offloading. It does not demonstrate full GPU residency or simultaneous GPU residency of the 7B bridge and 9B controller.
+
+**Controller self-reporting and provenance**
+
+The 9B controller summary described a manual, character-by-character parser fix for `parse_record`. The persisted action record instead shows `pre_candidate_dispatched=true` and `pre_candidate_substituted=true`: NOVA substituted the internally generated candidate into the controller's write operation. The executed artifact was `tokenizer.py`, whose SHA256 matches the bridge-selected V6 candidate. The original `parser.py` remained unchanged.
+
+The model-proposed-action preview was unparseable in the persisted audit, so the controller's original proposed target cannot be established from that preview. The summary nevertheless omits the actual candidate-generation and substitution provenance and attributes the repair to its own manual parsing work. This is a demonstrated self-reporting/provenance limitation, not a hidden-test failure: the final artifact independently passed all six CFD001 hidden tests.
+
+**Relationship to Findings G and H**
+
+- Finding G is the earlier 9B result using an externally generated and manually supplied candidate. Finding I supersedes G specifically as evidence of internal preflight orchestration with the 9B controller; G remains the external-injection baseline.
+- Finding H demonstrated internal preflight with the 4B controller. Finding I complements H by demonstrating the same benchmark workflow with the 9B controller.
+- Together, H and I establish internal-preflight integration with both controller sizes on CFD001. Neither establishes generalization to another benchmark. Finding I also does not establish the resident-model stop branch or simultaneous GPU residency.
+
+The 9B hidden tests were rerun independently after the initial verification: 6 passed, exit code 0. The verified workspace hashes were unchanged: `parser.py` remained `030E8B9B269DE4DF50A217926C189B61F4C9161E49E57A3737AA2565CF15C4A6`, and `tokenizer.py` remained `59366286026E0FF7B77EE1AB65F989231462A79B143ACCF1C04280270CD269FE`.
+
+## Finding J: CFD-002 Repair Independently Verified; Post-Write Completion Gate Reuses Baseline Expectation (2026-11-14)
+
+**Result: REPAIR VERIFIED ? 8/8 independent hidden tests. Pipeline self-completion failed.**
+
+NOVA produced and dispatched a repair for a second benchmark task, CFD-002, involving retry-control-flow behavior in `retrying.py`. This is a different task and defect mechanism from CFD-001's cross-file quoted-record parsing.
+
+### 1. Execution provenance
+
+- Run ID: `4c45295e-db53-4330-8fbd-890f80b49b10`
+- Controller: `qwen3.5:9b-8k`
+- Mode: `planning_mode=True`
+- Steps: 6
+- Wall time: 108.119 seconds
+- Initial source SHA256: `7DED3E8FECB4C65674BC29F60F3D830FEF789757F7DAA7142D154B2D421F5963`
+- Repaired workspace:
+  `C:\Users\Shahid\nova-eval-lab\cfd002-planning-typed-v3-20261114\workspace`
+- Evidence database:
+  `C:\Users\Shahid\nova-eval-lab\cfd002-planning-typed-v3-20261114\nova.sqlite3`
+
+The run proceeded through listing files, reading `retrying.py`, generating a behavioral hypothesis, obtaining causal-review approval, and dispatching the first write.
+
+### 2. Repair artifact
+
+At step 2, NOVA dispatched a write to the existing `retrying.py`. The execution journal records `execution_status: succeeded`. The causal reviewer returned `APPROVE`, with `repair_target: retrying.py`, and its review response passed local evidence validation.
+
+The resulting workspace file had SHA256:
+
+`8171E10F9D54888C3C042D0F9790062A4D5DB885670997D6A46B2C1BD0FFB14A`
+
+The written implementation:
+- rejects boolean and non-integer `max_attempts`;
+- rejects non-positive attempt counts;
+- rejects negative or non-numeric `base_delay`;
+- records the final matching exception;
+- sleeps only between attempts, using exponential backoff;
+- re-raises the final exception unchanged after exhaustion.
+
+### 3. Independent verification
+
+The repaired workspace was subsequently tested against the separate CFD-002 hidden oracle using NOVA's evaluation harness.
+
+**Independent result: 8 passed, exit code 0.**
+
+This is the decisive evidence that the dispatched repair satisfied the hidden benchmark contract. It is not inferred from the model's completion summary.
+
+### 4. Diagnostic probe qualification
+
+The first diagnostic hypothesis concerned `max_attempts=True`. The observed original implementation accepted the boolean and returned the operation's value, `1`.
+
+However, the generated probe encoded its expectation as `{"return_value": 1}`, while the sandbox returned the scalar `1`. The recorded verdict was therefore `PREDICTION_MISMATCHED`.
+
+Consequently, this verdict must not be described as a successful prediction match or as independent causal proof. The actual observed return value, source inspection, approved repair, and independent hidden-test result are separate evidence items.
+
+### 5. Post-write completion-gate defect
+
+After the first repair was dispatched, NOVA proposed `done`. The completion gate rejected it.
+
+The source-code mechanism is now confirmed:
+
+1. Before the write, the controller stores the diagnostic probe and its baseline expectation in `last_behavioral_probe`.
+2. At completion time, the generic gate replays `last_behavioral_probe["probe"]` against the modified source.
+3. The gate requires the post-write result to be `PREDICTION_MATCHED`.
+4. It does not obtain an independent contract-correct expectation for the repaired implementation.
+
+For this run, the original diagnostic expectation was a return value of `1` for `max_attempts=True`. The repaired implementation correctly raised `TypeError("max_attempts must be an integer")`. The gate compared the repaired behavior against the buggy baseline expectation and rejected the completion.
+
+This is a semantic design error: a diagnostic probe asks whether the original defect is present; an acceptance test asks whether the repaired implementation now satisfies the contract. They are not interchangeable.
+
+### 6. Secondary probe-construction failure
+
+After the completion rejection, NOVA read the file again and proposed another write. That proposal was blocked at step 5 with:
+
+`Expected exceptions require expected_result to be null.`
+
+The generated probe contained both a non-null `expected_result` and a non-null `expected_exception`. The validator correctly rejected this contradictory expectation. This is a separate model probe-construction failure; the validator should not be relaxed to accept it.
+
+The top-level run record reports `termination_reason: causal_review_blocked`. The step-level transcript gives the more specific sequence: completion-gate rejection at step 3, followed by a second write blocked by hypothesis validation at step 5. These distinctions should be retained rather than collapsing the entire run into a single failure label.
+
+### 7. What this establishes
+
+1. **A second-task repair was generated by the NOVA planning-mode workflow.** The task was a retry-control-flow defect, not CFD-001's parser/tokenizer defect.
+2. **The causal reviewer approved the proposed repair**, and the first write was successfully dispatched.
+3. **The dispatched artifact independently passed all 8 CFD-002 hidden tests.**
+4. **The generic post-write completion gate is incorrect for unregistered tasks when it reuses baseline diagnostic expectations as acceptance criteria.**
+5. **Probe generation remains imperfect.** The later contradictory expectation was rejected correctly by the existing validator.
+
+This is a second independently verified task instance. It is evidence of cross-task capability, but not a reliability estimate or proof of broad generalization.
+
+### 8. What this does not establish
+
+- NOVA did not complete its own task protocol: `agent_success` was false.
+- The generic post-write completion gate did not verify the repair successfully.
+- The first diagnostic probe's `PREDICTION_MISMATCHED` verdict does not establish a correct prediction match.
+- One task, one run, one seed does not establish general reliability.
+- This result does not establish that arbitrary unregistered tasks can be safely verified.
+
+### 9. Corrective design identified ? not yet implemented
+
+The selected direction is an independent acceptance-contract registry:
+
+- A controller-owned dictionary maps registered task IDs to trusted acceptance providers.
+- An acceptance provider supplies contract-correct post-write verification, independently of model-generated diagnostic expectations.
+- CFD-001's existing acceptance path remains unchanged.
+- CFD-002 will receive a registered acceptance provider containing the eight contract checks represented by its hidden benchmark.
+- For a task without a registered provider, NOVA must fail closed: `agent_success=False`, `stop_reason=verification_unavailable`, an explicit outcome reason, and preservation of the resulting workspace artifact.
+- There must be no fallback from a missing acceptance provider to replaying the model's pre-repair diagnostic probe.
+
+This correction has not yet been applied or measured. The CFD-002 run above remains the preserved reference result for the discovery.
+
+### 10. Preservation
+
+- Run ID: `4c45295e-db53-4330-8fbd-890f80b49b10`
+- Workspace: `cfd002-planning-typed-v3-20261114`
+- Database: `cfd002-planning-typed-v3-20261114\nova.sqlite3`
+- Original baseline SHA256: `7DED3E8FECB4C65674BC29F60F3D830FEF789757F7DAA7142D154B2D421F5963`
+- Repaired artifact SHA256: `8171E10F9D54888C3C042D0F9790062A4D5DB885670997D6A46B2C1BD0FFB14A`
+- Independent hidden oracle: 8/8 passed.
+- No code changes to the completion gate have been made as part of this finding.
+
+## Finding K: CFD-002 Passes Historical 9-Case Provider and Independent 8-Test Oracle (2026-11-14)
+
+**Historical result: NOVA self-completion succeeded; trusted acceptance passed 9/9 under the then-current inventory; independent oracle passed 8/8. A later 11-case inventory exposed two additional failures in this candidate.**
+
+This follow-up records the successful CFD-002 run after implementing the trusted acceptance-provider registry and constraining the function-call behavioral-probe schema. Finding J remains the historical record of the earlier run in which a repair was independently correct but the generic completion gate rejected it.
+
+### 1. Execution provenance
+
+- Run ID: `91f30bd4-7563-4464-a5fd-0ffdba9464be`
+- Task ID: `retry_control_flow_002`
+- Controller: `qwen3.5:9b-8k`
+- Mode: `planning_mode=True`
+- Steps: 5
+- Wall time: 106.62426 seconds
+- Prompt tokens: 14,303
+- Completion tokens: 1,448
+- Total tokens: 15,751
+- JSON schema mode: enabled
+- Stop reason: `completed`
+- `agent_success`: `true`
+- Causal reviews: 1
+- Behavioral probes: 1 attempted, 1 completed
+- Post-write behavioral check: passed
+- Pre-gate blocked: false
+- Plan revisions: 0
+
+The run began from the V2 partial-repair workspace. The starting `retrying.py` SHA256 was:
+
+`97369de852c1c5b183066f20895f0f9d07ee1b70375cf390276df75bc80a5469`
+
+### 2. Repair artifact
+
+NOVA changed only `retrying.py`. The run reported no new files.
+
+The V3 candidate's observed validation behavior was:
+- Boolean `max_attempts` raises `TypeError`.
+- Integer `max_attempts` values less than or equal to zero raise `ValueError` before the operation is called.
+- String and float `max_attempts` values raise `ValueError`, not the subsequently required `TypeError`.
+The string and float requirements were not part of the then-current nine-case acceptance inventory. The later 11-case suite exposed these gaps. The V3 result below is therefore a historical pass against its original inventory, not complete satisfaction of the strengthened contract.
+
+The task summary reports that the public signature and the other retry behavior were preserved.
+
+Final candidate SHA256:
+
+`d3dae5fc73bbecc5c142ac6201be502deb2045ae994505be1bb551a60f67460d`
+
+Workspace:
+
+`C:\Users\Shahid\nova-eval-lab\cfd002-registered-provider-v3-20261114\workspace`
+
+Database:
+
+`C:\Users\Shahid\nova-eval-lab\cfd002-registered-provider-v3-20261114\nova.sqlite3`
+
+Serialized result:
+
+`C:\Users\Shahid\nova-eval-lab\cfd002-registered-provider-v3-20261114\result.json`
+
+### 3. Trusted acceptance-provider result
+
+The completion gate used:
+
+`trusted_acceptance_provider`
+
+The registered CFD-002 provider reported **9 cases passed, 0 failed**:
+
+1. `success_on_first_attempt_does_not_sleep`
+2. `transient_failures_use_exponential_backoff`
+3. `exhaustion_raises_final_exception_without_final_sleep`
+4. `single_attempt_propagates_without_sleeping`
+5. `non_retryable_exception_propagates_immediately`
+6. `retry_exception_subclasses_are_supported`
+7. `zero_attempts_are_rejected_before_calling_operation`
+8. `negative_base_delay_is_rejected`
+9. `boolean_attempt_count_is_rejected`
+
+The result reported:
+- `verification_status: passed`
+- `verification_unavailable: false`
+- `verification_failed: false`
+- `completion_gate_blocked: false`
+- `agent_success: true`
+
+This is evidence that the registered provider supplied post-write acceptance criteria independent of the model's pre-repair diagnostic expectation.
+
+### 4. Independent oracle verification
+
+After the NOVA run, the candidate was tested separately against the preserved CFD-002 oracle:
+
+`C:\Users\Shahid\nova-eval-lab\cfd002-live-20261114-1650\oracle\test_retrying.py`
+
+Result:
+
+**8 passed in 0.02 seconds.**
+
+The provenance check confirmed that Python imported `retrying.py` from the V3 workspace:
+
+`C:\Users\Shahid\nova-eval-lab\cfd002-registered-provider-v3-20261114\workspace\retrying.py`
+
+The imported candidate SHA256 matched the recorded V3 final hash:
+
+`D3DAE5FC73BBECC5C142AC6201BE502DEB2045AE994505BE1BB551A60F67460D`
+
+The independent oracle file SHA256 was:
+
+`50E57533A7ED434D8F495F183D9B1DA96483C72BBD5DA6312BB03931B6E44C8D`
+
+The oracle result is separate from the provider's historical 9-case result. Both passed against the V3 artifact, but the expanded 11-case provider later exposed the two validation gaps recorded below.
+
+### 5. Probe-schema correction
+
+V2 did not write a repair because the generated function-call probe supplied non-canonical metadata. The parser correctly required an empty `symbol` and `expected_present: false`, but the response schema did not constrain those fields.
+
+The response schema now encodes:
+- `symbol` as a string with enum `[""]`;
+- `expected_present` as a boolean with enum `[false]`.
+
+The existing parser and behavioral-probe validator were not relaxed. Regression coverage checks both the generic and CFD-001 response-schema generation paths.
+
+In V3:
+- one behavioral probe was attempted;
+- one behavioral probe completed;
+- no probe-contract rejection occurred;
+- the post-write behavioral check passed.
+
+### 6. Regression and lint status
+
+After the schema change:
+- Hypothesis-testing tests: 45 passed.
+- Full repository test suite: 377 passed.
+- Ruff on the seven files changed in this work: all checks passed.
+- `git diff --check`: no whitespace errors.
+
+A full-repository Ruff scan still reports 38 lint findings in other files. These were not auto-fixed because broad lint remediation is outside this repair and could introduce unrelated changes.
+
+### 7. What this establishes
+
+1. The controller-owned acceptance-provider registry can verify a registered task using contract-defined post-write checks.
+2. CFD-002 completed through NOVA's own task protocol with `agent_success: true`.
+3. The provider passed all nine cases in the historical inventory used for this run; the later 11-case inventory exposed the string and float validation gaps.
+4. The separate hidden oracle passed all eight tests.
+5. Constraining the function-call response schema resolved the V2 canonical-metadata probe rejection without weakening the validator.
+6. The CFD-001 acceptance path remains covered by its dedicated regression tests; this change did not replace that path.
+
+This is one successful registered CFD-002 run. It demonstrates the repaired workflow on this task, not a general reliability estimate across arbitrary tasks.
+
+### 8. Preservation and status
+
+- Run ID: `91f30bd4-7563-4464-a5fd-0ffdba9464be`
+- Workspace: `cfd002-registered-provider-v3-20261114`
+- Database: `cfd002-registered-provider-v3-20261114\nova.sqlite3`
+- Initial candidate SHA256: `97369de852c1c5b183066f20895f0f9d07ee1b70375cf390276df75bc80a5469`
+- Final candidate SHA256: `d3dae5fc73bbecc5c142ac6201be502deb2045ae994505be1bb551a60f67460d`
+- Trusted acceptance provider: 9/9 passed under the historical nine-case inventory; subsequent 11-case reassessment of this V3 artifact: 9/11.
+- Independent oracle: 8/8 passed.
+- Full repository tests: 377 passed.
+- Changed-file Ruff: passed.
+- No files staged or committed.
+
+### Subsequent qualification: expanded 11-case contract (2026-11-14)
+
+The preserved V3 source was later evaluated directly against the current registered CFD-002 provider, whose expected inventory contains 11 cases. The source hash was `D3DAE5FC73BBECC5C142AC6201BE502DEB2045AE994505BE1BB551A60F67460D`.
+
+**Expanded-provider result: 9 passed, 2 failed.**
+
+The two failures were:
+- `string_attempt_count_is_rejected`: expected `TypeError`; observed `ValueError`.
+- `float_attempt_count_is_rejected`: expected `TypeError`; observed `ValueError`.
+
+This reassessment does not invalidate the historical 9/9 result: that result accurately describes the nine-case inventory used during the original V3 run. It does establish that the V3 candidate did not satisfy the subsequently strengthened 11-case contract. The separate 8-test independent-oracle pass remains a distinct historical result and does not override these two additional registered-provider failures.
+
+## Finding L: CFD-002 Trusted Pre-Write Acceptance Blocks a Defective Candidate and Enables Completion (2026-11-14)
+
+**Result: NOVA completed CFD-002 after the trusted pre-write gate rejected its first proposed repair. The revised candidate passed all 11 registered acceptance cases before dispatch and again after writing; the separate independent oracle passed 8/8.**
+
+This finding records the V6-to-V7 correction of the CFD-002 candidate-verification workflow. Unlike the V3 result in Finding K, V7 was evaluated against the expanded 11-case registered contract and passed it at both the pre-write and post-write gates.
+
+### 1. Execution provenance
+
+The first V7 invocation did not reach the repair loop:
+
+- Run ID: `30bb0e79-2c60-4d8a-a09f-c6cd4cb94897`
+- Stop reason: `planning_error`
+- Executed steps: 0
+- Planning error: `model_call_failed: error: ReadTimeout: timed out`
+
+This was a model-call timeout, not a candidate-acceptance failure. The successful retry used a 300-second timeout for that invocation only; the application's default model timeout was not changed globally.
+
+Successful V7 retry:
+
+- Run ID: `b2a02b3a-3af4-47fc-b45e-2f48a16a0a6b`
+- Task ID: `retry_control_flow_002`
+- Controller: `qwen3.5:9b-8k`
+- Mode: `planning_mode=True`
+- Executed steps: 6
+- Wall time: 490.21 seconds
+- Causal reviews: 1
+- Behavioral probes: 2
+- Stop reason: `completed`
+- `agent_success`: `true`
+- Completion verification: trusted registered acceptance provider, passed
+
+Workspace:
+
+`C:\Users\Shahid\nova-eval-lab\cfd002-registered-provider-v7-retry-300s-20261114\workspace`
+
+Database:
+
+`C:\Users\Shahid\nova-eval-lab\cfd002-registered-provider-v7-retry-300s-20261114\nova.sqlite3`
+
+Serialized result:
+
+`C:\Users\Shahid\nova-eval-lab\cfd002-registered-provider-v7-retry-300s-20261114\result.json`
+
+The successful workspace was freshly initialized from the preserved V3 candidate. Its starting `retrying.py` SHA256 matched the V3 hash:
+
+`D3DAE5FC73BBECC5C142AC6201BE502DEB2045AE994505BE1BB551A60F67460D`
+
+### 2. Failure mode established by V6
+
+The preceding V6 run demonstrated why a model-selected behavioral probe alone was insufficient as the authority for acceptance:
+
+- Run ID: `5dff0ec3-b839-47ff-9f3f-82ed5778c62d`
+- Stop reason: `verification_failed`
+- Registered provider result: 9/11
+- Source SHA256 remained unchanged at `D3DAE5FC73BBECC5C142AC6201BE502DEB2045AE994505BE1BB551A60F67460D`
+
+For the string `max_attempts` case, the model's hypothesis expected `ValueError`, and the existing implementation produced `ValueError`. The diagnostic therefore returned `PREDICTION_MATCHED`, even though the expanded contract required `TypeError`. A no-op write was approved; the source remained unchanged.
+
+This was a self-confirming diagnostic, not evidence that the contract was satisfied. The registered provider's expanded 11-case result exposed the gap.
+
+### 3. Trusted pre-write acceptance gate
+
+V7 exercised the controller-owned acceptance check against proposed source content before dispatching a write.
+
+The first proposed candidate failed the expanded registered provider:
+
+**9 passed, 2 failed.**
+
+The failures were:
+
+- `string_attempt_count_is_rejected`: expected `TypeError`, observed `ValueError`.
+- `float_attempt_count_is_rejected`: expected `TypeError`, observed `ValueError`.
+
+The controller blocked this candidate before behavioral probing, causal review, or dispatch. It returned the case-level acceptance failures as feedback for candidate revision.
+
+The subsequent candidate passed the trusted pre-write acceptance provider:
+
+**11 passed, 0 failed.**
+
+Only after that pass did the candidate proceed through causal review and dispatch. The final written workspace then passed the registered provider again:
+
+**11 passed, 0 failed.**
+
+This sequence establishes that the controller rejected the defective proposal before writing it, accepted the revised proposal against the registered contract, and verified the resulting workspace after the write.
+
+### 4. Final repair artifact
+
+NOVA changed only `retrying.py`. No additional source files were changed in the successful V7 workspace.
+
+Final candidate SHA256:
+
+`5B8086AAB9A8ED02AD45807115CBAB894230DE090A2F6C3BD445F039466CCE51`
+
+The final implementation corrected the two expanded-contract failures by distinguishing non-integer `max_attempts` values from nonpositive integer values:
+
+- Boolean and other non-integer values raise `TypeError`.
+- Integer values less than or equal to zero raise `ValueError`.
+
+The registered provider also passed the retry, backoff, exception propagation, and sleep-boundary cases in the expanded inventory.
+
+### 5. Independent oracle verification
+
+The V7 candidate was tested separately against the same preserved oracle used for V3:
+
+`C:\Users\Shahid\nova-eval-lab\cfd002-live-20261114-1650\oracle\test_retrying.py`
+
+Result:
+
+**8 passed in 0.02 seconds.**
+
+The provenance check resolved the imported module to:
+
+`C:\Users\Shahid\nova-eval-lab\cfd002-registered-provider-v7-retry-300s-20261114\workspace\retrying.py`
+
+The imported V7 candidate SHA256 was:
+
+`5B8086AAB9A8ED02AD45807115CBAB894230DE090A2F6C3BD445F039466CCE51`
+
+The oracle test file SHA256 was:
+
+`50E57533A7ED434D8F495F183D9B1DA96483C72BBD5DA6312BB03931B6E44C8D`
+
+This is a separate test artifact and execution from the registered acceptance provider. The two results should be reported as distinct verification layers, not combined into a single test count.
+
+### 6. Regression and hygiene status
+
+After the controller changes:
+
+- Causal-review controller tests: 17 passed.
+- Full repository test suite: 382 passed.
+- Ruff on the changed controller and regression-test files: all checks passed.
+- `git diff --check`: no whitespace errors.
+
+The candidate bridge environment was not configured for this CFD-002 run. The documented acceptance results came from the registered provider and independent oracle, not from a candidate bridge.
+
+### 7. What this establishes
+
+1. A model-selected probe can match an incorrect hypothesis and fail to reveal a contract violation, as demonstrated by V6.
+2. The trusted pre-write acceptance gate evaluates proposed source content against registered task criteria before dispatch.
+3. In V7, the gate blocked the first candidate at 9/11 and supplied the two failing cases as revision feedback.
+4. The revised candidate passed all 11 registered acceptance cases before dispatch and after writing.
+5. The separate independent oracle passed all eight tests against the exact V7 workspace source.
+6. The controller regression suite and full repository test suite passed after the pre-write gate changes.
+7. The dedicated CFD-001 acceptance path remains covered by its regression tests; this CFD-002 change did not replace that path.
+
+This is a successful CFD-002 run with two distinct verification layers. It demonstrates the revised workflow on this task; it is not a general reliability estimate across arbitrary tasks.
+
+### 8. Preservation and status
+
+- Successful run ID: `b2a02b3a-3af4-47fc-b45e-2f48a16a0a6b`
+- Workspace: `cfd002-registered-provider-v7-retry-300s-20261114`
+- Starting source SHA256: `D3DAE5FC73BBECC5C142AC6201BE502DEB2045AE994505BE1BB551A60F67460D`
+- Final source SHA256: `5B8086AAB9A8ED02AD45807115CBAB894230DE090A2F6C3BD445F039466CCE51`
+- Pre-write candidate acceptance: 11/11 passed on the revised candidate.
+- Post-write registered acceptance: 11/11 passed.
+- Independent oracle: 8/8 passed.
+- Full repository tests: 382 passed.
+- Ruff and `git diff --check`: passed.
+- No files staged or committed.

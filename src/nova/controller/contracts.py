@@ -58,6 +58,17 @@ ACTION_CONTRACTS = MappingProxyType({
             "inspect or verify task results."
         ),
     ),
+    "generate_candidate": ActionContract(
+        required_fields=frozenset({"path"}),
+        optional_fields=frozenset({"task_context"}),
+        non_empty_fields=frozenset({"path"}),
+        effect="control",
+        description=(
+            "Loads an internally generated repair candidate for the given "
+            "workspace path into pipeline state. Writes nothing. A subsequent "
+            "done or write_file is replaced with the loaded candidate."
+        ),
+    ),
 })
 
 

@@ -1,4 +1,4 @@
-﻿from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError
 
 import pytest
 
@@ -102,6 +102,7 @@ def test_all_contracts_have_valid_effect_metadata():
         "read_file",
         "list_files",
         "done",
+        "generate_candidate",
     }
     assert all(
         contract.effect in {"read", "write", "control"}

@@ -137,10 +137,24 @@ HYPOTHESIS_SCHEMA = {
                 "kind": {"type": "string", "enum": ["function_call"]},
                 "path": {"type": "string", "minLength": 1},
                 "function": {"type": "string"},
-                "symbol": {"type": "string"},
-                "expected_present": {"type": "boolean"},
-                "args": {"type": "array", "items": {}},
-                "kwargs": {"type": "object", "additionalProperties": {}},
+                "symbol": {"type": "string", "enum": [""]},
+                "expected_present": {"type": "boolean", "enum": [False]},
+                "args": {
+                    "type": "array",
+                    "items": {},
+                    "description": (
+                        "JSON values or the allowlisted $nova_probe "
+                        "callable/exception_types descriptors."
+                    ),
+                },
+                "kwargs": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "description": (
+                        "JSON values or the allowlisted $nova_probe "
+                        "callable/exception_types descriptors."
+                    ),
+                },
                 "expected_result": {},
                 "expected_exception": {
                     "anyOf": [
@@ -419,6 +433,44 @@ def build_hypothesis_messages(
             "Use type=quoted for values containing quotes or semicolons and "
             "type=unquoted otherwise. The controller serializes the fields. "
         )
+    retry_control_flow_instruction = ""
+    if benchmark_task_id == "retry_control_flow_002":
+        payload["retry_control_flow_probe_example"] = {
+            "target": {"path": "retrying.py", "function": "call_with_retry"},
+            "signature": (
+                "call_with_retry(operation, *, max_attempts=3, "
+                "retry_on=(TimeoutError,), base_delay=0.1, sleep=time.sleep)"
+            ),
+            "cases": [
+                {
+                    "purpose": "string max_attempts must be rejected as a non-integer",
+                    "args": [
+                        {"$nova_probe": "callable", "behavior": "noop"}
+                    ],
+                    "kwargs": {"max_attempts": "3"},
+                },
+                {
+                    "purpose": "float max_attempts must be rejected as a non-integer",
+                    "args": [
+                        {"$nova_probe": "callable", "behavior": "noop"}
+                    ],
+                    "kwargs": {"max_attempts": 1.5},
+                },
+            ],
+        }
+        retry_control_flow_instruction = (
+            " For retry_control_flow_002, when probing call_with_retry, "
+            "follow its signature exactly: operation is the first positional "
+            "parameter and must receive a callable descriptor. max_attempts "
+            "is keyword-only and must be supplied in kwargs. For example, "
+            'use args=[{"$nova_probe":"callable","behavior":"noop"}] and '
+            'kwargs={"max_attempts":"3"} for the string validation case, or '
+            'kwargs={"max_attempts":1.5} for the float validation case. '
+            "Never put 3, a string, or a float alone in args: that binds the "
+            "value to operation and tests the wrong behavior. The supplied "
+            "example inputs are probe-shape guidance; determine the expected "
+            "baseline result from the observed source."
+        )
     cfd001_instruction = ""
     if benchmark_task_id == "cross_file_dependency_001":
         cfd001_instruction = (
@@ -457,20 +509,33 @@ def build_hypothesis_messages(
         "of causality. Choose an exact path/function pair from "
         "probe_candidates, which contains observed public top-level "
         "synchronous functions only. Supply "
-        "JSON-compatible positional args, keyword kwargs, and the exact "
-        "expected JSON result. Set expected_exception to null for a normal "
+        "JSON-compatible positional args and keyword kwargs that respect "
+        "the observed function signature. Parameters after bare * or *args "
+        "are keyword-only and MUST appear in kwargs, never args. Do not exceed "
+        "the declared positional parameter count unless *args exists. Provide "
+        "the exact expected JSON result. Set expected_exception to null for a normal "
         "return. For an expected exception, provide its exact type and "
         "message in expected_exception and set expected_result to null. "
         "The verifier compares both exception type and message exactly. "
-        "Probe args must be JSON-compatible runtime values, not Python "
-        "source notation. "
+        "Probe args and kwargs must be JSON values, not Python source "
+        "notation. For a required callback parameter, use only one of these "
+        'exact descriptors: {"$nova_probe":"callable","behavior":"return",'
+        '"value":42}; {"$nova_probe":"callable","behavior":"raise",'
+        '"exception_type":"TimeoutError","message":"retry"}; or '
+        '{"$nova_probe":"callable","behavior":"noop"}. For a parameter '
+        'requiring a tuple of exception classes, use '
+        '{"$nova_probe":"exception_types","items":["TimeoutError"]}. '
+        "Exception names are restricted to the controller's built-in "
+        "allowlist. Do not provide Python source, lambdas, imports, or "
+        "arbitrary callable code. Use descriptors only when the observed "
+        "function signature requires those runtime types. "
         "Set symbol to an empty string and "
         "expected_present to false. Do not provide code, shell commands, or "
         "imports. The controller executes the function in a restricted "
         "sandbox. A matched or mismatched prediction is behavioral evidence, "
         "not proof of causality. Do not invent a probe if you cannot predict "
         "a concrete result."
-    ) + feedback_instruction + dependency_instruction + cfd001_instruction
+    ) + feedback_instruction + dependency_instruction + cfd001_instruction + retry_control_flow_instruction
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -651,7 +716,7 @@ def parse_hypothesis(raw, observed_files, benchmark_task_id=None):
             raise HypothesisProbeError(
                 "Behavioral probes require empty symbol and false expected_present."
             )
-        from nova.tools.behavioral_probe import validate_behavioral_probe
+        from nova.tools.behavioral_probe import BehavioralProbeError, validate_behavioral_probe
 
         behavioral_probe = {
             key: probe[key]
@@ -677,6 +742,12 @@ def parse_hypothesis(raw, observed_files, benchmark_task_id=None):
                 ),
             )
             behavioral_probe["args"] = normalized_behavioral_probe["args"]
+            behavioral_probe["kwargs"] = normalized_behavioral_probe["kwargs"]
+        except BehavioralProbeError as exc:
+            raise ProbeContractError(
+                f"Invalid behavioral function-call probe: {exc}",
+                probe_input=behavioral_probe,
+            ) from exc
         except (TypeError, ValueError) as exc:
             raise HypothesisProbeError(str(exc)) from exc
 

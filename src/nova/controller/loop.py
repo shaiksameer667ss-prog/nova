@@ -1,13 +1,20 @@
 import ast
 import hashlib
 import json
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from nova.client import ModelClient
 from nova.config import Settings
+from nova.controller.acceptance_providers import (
+    ACCEPTANCE_PROVIDERS,
+    execute_acceptance_suite,
+)
+from nova.controller.candidate_generator import generate_candidate
 from nova.controller.causal_review import (
     CausalReviewError,
     build_causal_review_response_format,
@@ -80,6 +87,16 @@ Rules:
 - Call done only when you believe the fix is complete.
 """
 
+_CFD001_GENERATE_CANDIDATE_ADDENDUM = """
+
+Repair-candidate generation (this task only):
+- Before proposing write_file or done for tokenizer.py, call
+  {"action": "generate_candidate", "path": "tokenizer.py", "task_context": "<short summary>"}.
+- The system loads an internally generated repair candidate for that path.
+- A subsequent done or write_file will be replaced with the loaded candidate.
+- Do not call generate_candidate more than twice; after a candidate is dispatched it is refused.
+"""
+
 # Flat JSON Schema: compatible with the tested Ollama 0.40.15 setup.
 # Action-specific required fields are enforced by _validate_action below.
 NOVA_ACTION_SCHEMA = {
@@ -87,12 +104,13 @@ NOVA_ACTION_SCHEMA = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["write_file", "read_file", "list_files", "done"],
+            "enum": ["write_file", "read_file", "list_files", "done", "generate_candidate"],
         },
         "path": {"type": "string"},
         "content": {"type": "string"},
         "subdir": {"type": "string"},
         "summary": {"type": "string"},
+        "task_context": {"type": "string"},
     },
     "required": ["action"],
     "additionalProperties": False,
@@ -294,6 +312,41 @@ def _cfd001_evaluate_candidate(
     }
 
 
+def _format_probe_contract_retry_feedback(
+    reason: str,
+    benchmark_task_id: str | None,
+) -> str:
+    """Explain rejected behavioral probes without confusing task contracts."""
+    if benchmark_task_id == "cross_file_dependency_001":
+        guidance = (
+            "Generate a fresh CFD-001 function_call probe. The user payload "
+            "contains cfd001_probe_example with a validated runtime_value "
+            "and its JSON encoding. Copy runtime_value exactly into args[0]; "
+            "do not reconstruct or alter its backslashes. Keep it as one "
+            "complete, non-empty key=value record. "
+        )
+    else:
+        guidance = (
+            "Generate a fresh function_call probe grounded in the observed "
+            "Python function signature. Parameters after bare * or *args "
+            "are keyword-only and MUST be supplied in kwargs, never args. "
+            "Supply every required parameter exactly once. Do not repeat a "
+            "positional parameter as a keyword, supply unexpected keywords, "
+            "or exceed the positional parameter count unless the function "
+            "accepts *args. Predict the unchanged source behavior exactly. "
+        )
+
+    return (
+        "Your proposed write was NOT executed. The behavioral probe was "
+        "rejected by deterministic behavioral-probe contract validation "
+        "before sandbox execution. This is a probe-generation failure, "
+        "NOT a prediction mismatch and NOT causal evidence.\n"
+        f"Validation reason: {reason}\n"
+        + guidance
+        + "Reconsider the proposed repair using only valid behavioral evidence."
+    )
+
+
 def _format_pre_gate_feedback(result: dict) -> str:
     """Format pre-gate failures as a user message. No prescription."""
     lines = [
@@ -309,6 +362,37 @@ def _format_pre_gate_feedback(result: dict) -> str:
         lines.append("")
     lines.append("Correct the complete file and try again.")
     return "\\n".join(lines)
+
+
+def _format_registered_acceptance_feedback(result: dict) -> str:
+    """Explain trusted pre-write acceptance failures without prescribing a fix."""
+    lines = [
+        "Your proposed write to an existing Python source file was NOT executed."
+    ]
+
+    if result.get("status") == "unavailable":
+        lines.append(
+            "The trusted acceptance pre-write gate could not run: "
+            + str(result.get("reason", "Unknown provider error."))
+        )
+    else:
+        lines.append(
+            f"{result.get('cases_failed', 0)} of "
+            f"{result.get('case_count', 0)} trusted acceptance cases failed:"
+        )
+        for index, case in enumerate(
+            (
+                item for item in result.get("cases", [])
+                if item.get("status") != "passed"
+            ),
+            1,
+        ):
+            lines.append(f"{index}. {case.get('name', 'unnamed case')}")
+            if case.get("reason"):
+                lines.append(f"   Reason: {case['reason']}")
+
+    lines.append("Correct the complete file and submit a revised candidate.")
+    return "\n".join(lines)
 
 
 def _parse_action(text: str) -> dict:
@@ -383,6 +467,106 @@ def _snapshot_workspace_hashes(workspace: Path) -> dict[str, str]:
     return hashes
 
 
+
+def _snapshot_workspace_python_sources(workspace: Path) -> dict[str, str]:
+    """Read candidate Python sources for the trusted acceptance provider."""
+    root = Path(workspace).resolve()
+    forbidden = {".git", ".env", ".venv", "hidden_tests", "reference", "verifier"}
+    sources: dict[str, str] = {}
+
+    for candidate in sorted(root.rglob("*")):
+        if not candidate.is_file():
+            continue
+
+        relative = candidate.relative_to(root)
+        if forbidden.intersection(relative.parts):
+            continue
+        if candidate.suffix.lower() != ".py":
+            continue
+        if candidate.is_symlink():
+            raise OSError(f"Symbolic links are forbidden in acceptance sources: {relative}")
+
+        key = relative.as_posix()
+        resolved = _workspace_relative_key(root, key)
+        if resolved is None:
+            raise OSError(f"Candidate source escapes workspace: {relative}")
+
+        sources[resolved] = candidate.read_text(encoding="utf-8-sig")
+
+    return sources
+
+
+def _ensure_local_ollama_model_unloaded(settings: Settings) -> dict:
+    """Ensure the local controller model is not resident before 7B inference."""
+    parsed = urlsplit(settings.base_url)
+    host = (parsed.hostname or "").lower()
+
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError(f"invalid controller base URL: {exc}") from exc
+
+    is_local_ollama = (
+        parsed.scheme in ("http", "https")
+        and host in {"localhost", "127.0.0.1", "::1"}
+        and port == 11434
+    )
+    if not is_local_ollama:
+        return {"status": "not_local_ollama"}
+
+    model_name = settings.model
+
+    def resident_model_present() -> bool:
+        result = subprocess.run(
+            ["ollama", "ps"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                "ollama ps failed: "
+                + (result.stderr or result.stdout or "").strip()[:500]
+            )
+
+        for line in (result.stdout or "").splitlines():
+            fields = line.split()
+            if fields and fields[0].upper() != "NAME" and fields[0] == model_name:
+                return True
+        return False
+
+    if not resident_model_present():
+        return {
+            "status": "already_unloaded",
+            "model": model_name,
+        }
+
+    stop_result = subprocess.run(
+        ["ollama", "stop", model_name],
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=False,
+    )
+
+    # Verify actual residency; do not trust the stop command's exit code alone.
+    if resident_model_present():
+        detail = (
+            stop_result.stderr or stop_result.stdout or ""
+        ).strip()[:500]
+        raise RuntimeError(
+            f"Ollama model {model_name!r} remains resident after stop "
+            f"(exit={stop_result.returncode}): {detail}"
+        )
+
+    return {
+        "status": "unloaded",
+        "model": model_name,
+        "stop_returncode": stop_result.returncode,
+    }
+
+
 def _run_task_locked(
     task: str,
     settings: Settings,
@@ -420,6 +604,89 @@ def _run_task_locked(
                 model=settings.model,
             )
 
+            preflight_attempted = False
+            candidate_preflight = None
+
+            if pre_selected_candidate is not None:
+                if benchmark_task_id == "cross_file_dependency_001":
+                    candidate_preflight = {
+                        "attempted": False,
+                        "status": "skipped",
+                        "reason": "candidate_supplied_by_caller",
+                    }
+
+            elif benchmark_task_id == "cross_file_dependency_001":
+                preflight_attempted = True
+                gpu_handoff = None
+
+                try:
+                    # Do not start 7B inference until local Ollama residency
+                    # has been checked and the controller model is unloaded.
+                    gpu_handoff = _ensure_local_ollama_model_unloaded(settings)
+
+                    generation = generate_candidate(
+                        path="tokenizer.py",
+                        task_context=task,
+                        workspace=settings.workspace,
+                        settings=settings,
+                    )
+
+                    if not isinstance(generation, dict):
+                        raise TypeError(
+                            "candidate generator returned a non-dictionary result"
+                        )
+
+                    if generation.get("error"):
+                        raise RuntimeError(str(generation["error"]))
+
+                    if (
+                        generation.get("path") != "tokenizer.py"
+                        or not isinstance(generation.get("content"), str)
+                        or not generation["content"]
+                    ):
+                        raise ValueError(
+                            "candidate generator returned an invalid tokenizer.py candidate"
+                        )
+
+                    pre_selected_candidate = generation
+
+                    provenance_fields = (
+                        "path",
+                        "candidate_source",
+                        "generated_source_sha256",
+                        "broken_source_sha256",
+                        "model_id",
+                        "adapter_id",
+                        "adapter_sha256",
+                        "prompt_sha256",
+                        "selected_source",
+                        "selected_sha256",
+                        "trial_dir",
+                        "generation_config",
+                    )
+                    provenance = {
+                        key: generation[key]
+                        for key in provenance_fields
+                        if key in generation
+                    }
+
+                    candidate_preflight = {
+                        "attempted": True,
+                        "status": "succeeded",
+                        "gpu_handoff": gpu_handoff,
+                        "provenance": provenance,
+                    }
+
+                except Exception as exc:  # noqa: BLE001
+                    candidate_preflight = {
+                        "attempted": True,
+                        "status": "failed",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        "gpu_handoff": gpu_handoff,
+                    }
+
+            # Other task IDs retain their existing transcript behavior.
             try:
                 return _run_task_with_resources(
                     task=task,
@@ -437,6 +704,8 @@ def _run_task_locked(
                     task_id=task_id,
                     recovered_actions=recovered_actions,
                     recovered_runs=recovered_runs,
+                    preflight_attempted=preflight_attempted,
+                    candidate_preflight=candidate_preflight,
                 )
             except Exception as exc:
                 fail_run(conn, run_id, error_type=type(exc).__name__)
@@ -457,6 +726,8 @@ def _run_task_with_resources(
     use_json_schema: bool = True,
     planning_mode: bool = False,
     pre_selected_candidate: dict | None = None,
+    preflight_attempted: bool = False,
+    candidate_preflight: dict | None = None,
     *,
     client: ModelClient,
     conn,
@@ -469,15 +740,26 @@ def _run_task_with_resources(
     initial_workspace_hashes = _snapshot_workspace_hashes(settings.workspace)
     initial_workspace_files = set(initial_workspace_hashes)
 
+    _system_content = system_prompt if system_prompt is not None else SYSTEM_PROMPT
+    if (
+        benchmark_task_id == "cross_file_dependency_001"
+        and pre_selected_candidate is None
+        and not preflight_attempted
+    ):
+        _system_content = _system_content + _CFD001_GENERATE_CANDIDATE_ADDENDUM
+
     messages = [
-        {"role": "system", "content": system_prompt if system_prompt is not None else SYSTEM_PROMPT},
+        {"role": "system", "content": _system_content},
         {"role": "user", "content": f"Task: {task}"},
     ]
 
     transcript = []
+    if candidate_preflight is not None:
+        transcript.append({"event": "candidate_preflight", **candidate_preflight})
     agent_success = False
     final_summary = ""
     pre_candidate_dispatched = False
+    generate_candidate_calls = 0
 
     total_pt = 0
     total_ct = 0
@@ -504,7 +786,13 @@ def _run_task_with_resources(
     completion_gate = None
     completion_gate_blocked = False
     postwrite_behavior_check_passed = False
+    verification = None
+    verification_status = "not_required"
+    verification_unavailable = False
+    verification_failed = False
+    verification_reason = None
     consecutive_pre_gate_failures = 0
+    consecutive_registered_acceptance_failures = 0
     pre_gate_blocked = False
 
     def observe_local_python_dependencies(importer_path, importer_source):
@@ -843,39 +1131,132 @@ def _run_task_with_resources(
             proposed_action,
             observed_files,
         )
+        attempts = []
 
-        raw_review, usage_info, status = client.chat_with_usage(
-            review_messages,
-            seed=seed,
-            max_tokens=1536,
-            response_format=build_causal_review_response_format(
-                observed_files.keys(),
-                proposed_action["path"],
-            ),
-            reasoning_effort="none",
-        )
+        for attempt_number in (1, 2):
+            raw_review, usage_info, status = client.chat_with_usage(
+                review_messages,
+                seed=seed,
+                max_tokens=1536,
+                response_format=build_causal_review_response_format(
+                    observed_files.keys(),
+                    proposed_action["path"],
+                ),
+                reasoning_effort="none",
+            )
 
-        record_planning_model_call(
-            "causal_review",
-            usage_info,
-            status,
-        )
+            record_planning_model_call(
+                "causal_review",
+                usage_info,
+                status,
+            )
 
-        if status != "success":
-            return None, f"model_call_failed: {status}", raw_review
+            attempt_record = {
+                "attempt": attempt_number,
+                "model_status": status,
+                "raw_response": raw_review,
+            }
 
-        try:
-            return (
-                parse_prewrite_review(
+            if status != "success":
+                attempt_record["validation_status"] = "not_run"
+                attempt_record["validation_error"] = (
+                    f"model_call_failed: {status}"
+                )
+                attempts.append(attempt_record)
+                return (
+                    None,
+                    f"model_call_failed: {status}",
+                    raw_review,
+                    attempts,
+                )
+
+            try:
+                parsed_review = parse_prewrite_review(
                     raw_review,
                     observed_files,
                     proposed_action["path"],
-                ),
-                None,
-                raw_review,
-            )
-        except CausalReviewError as exc:
-            return None, f"invalid_causal_review: {exc}", raw_review
+                )
+            except CausalReviewError as exc:
+                attempt_record["validation_status"] = "failed"
+                attempt_record["validation_error"] = str(exc)
+                attempts.append(attempt_record)
+
+                if attempt_number == 2:
+                    return (
+                        None,
+                        f"invalid_causal_review: {exc}",
+                        raw_review,
+                        attempts,
+                    )
+
+                visible_line_counts = []
+                try:
+                    review_payload = json.loads(
+                        review_messages[-1]["content"]
+                    )
+                    observations = review_payload.get(
+                        "successful_file_observations", []
+                    )
+                    if isinstance(observations, list):
+                        for observation in observations:
+                            if not isinstance(observation, dict):
+                                continue
+                            observed_path = observation.get("path")
+                            count = observation.get("visible_line_count")
+                            if (
+                                isinstance(observed_path, str)
+                                and isinstance(count, int)
+                                and not isinstance(count, bool)
+                            ):
+                                visible_line_counts.append(
+                                    f"- {observed_path}: {count} visible lines"
+                                )
+                except (TypeError, ValueError, KeyError):
+                    visible_line_counts = []
+
+                if visible_line_counts:
+                    line_count_guidance = (
+                        "Visible source line counts (1-based, inclusive):\n"
+                        + "\n".join(visible_line_counts)
+                    )
+                else:
+                    line_count_guidance = (
+                        "Use only the numbered successful_file_observations "
+                        "already present in the review context. Do not infer "
+                        "or extend line ranges."
+                    )
+
+                review_messages.append({
+                    "role": "assistant",
+                    "content": (
+                        raw_review
+                        if isinstance(raw_review, str)
+                        else str(raw_review)
+                    ),
+                })
+                review_messages.append({
+                    "role": "user",
+                    "content": (
+                        "Your previous causal review was rejected by NOVA's "
+                        "local validator. This is your single permitted "
+                        "correction attempt.\n"
+                        f"Validation error: {exc}\n"
+                        f"{line_count_guidance}\n"
+                        "Return the complete corrected review JSON. Use "
+                        "only exact 1-based inclusive line ranges visible "
+                        "in successful_file_observations. Do not clip, "
+                        "guess, or invent evidence ranges. If the observed "
+                        "source does not support a valid citation, choose "
+                        "INVESTIGATE rather than APPROVE."
+                    ),
+                })
+                continue
+
+            attempt_record["validation_status"] = "passed"
+            attempts.append(attempt_record)
+            return parsed_review, None, raw_review, attempts
+
+        raise RuntimeError("Causal review retry loop exited unexpectedly.")
 
     if planning_mode:
         initial_plan, planning_error_message = request_plan(
@@ -950,6 +1331,102 @@ def _run_task_with_resources(
             })
             continue
 
+        if action.get("action") == "generate_candidate":
+            generate_candidate_calls += 1
+
+            if (
+                pre_candidate_dispatched
+                or pre_selected_candidate is not None
+                or preflight_attempted
+            ):
+                if pre_candidate_dispatched:
+                    refusal_status = "generate_candidate_refused_after_dispatch"
+                    refusal_reason = "a candidate was already dispatched"
+                elif pre_selected_candidate is not None:
+                    refusal_status = "generate_candidate_refused_candidate_available"
+                    refusal_reason = "a candidate is already loaded"
+                else:
+                    refusal_status = "generate_candidate_refused_preflight_attempted"
+                    refusal_reason = "preflight already ran; do not regenerate"
+
+                messages.append({"role": "user", "content": (
+                    f"generate_candidate refused: {refusal_reason}."
+                )})
+                transcript.append({
+                    "step": step,
+                    "action": action,
+                    "execution_status": refusal_status,
+                })
+                continue
+
+            if generate_candidate_calls > 2:
+                messages.append({"role": "user", "content": (
+                    "generate_candidate budget exhausted; continue without an internal candidate."
+                )})
+                transcript.append({
+                    "step": step,
+                    "action": action,
+                    "execution_status": "generate_candidate_budget_exhausted",
+                })
+                continue
+
+            try:
+                gpu_handoff = _ensure_local_ollama_model_unloaded(settings)
+            except Exception as exc:  # noqa: BLE001
+                handoff_error = f"{type(exc).__name__}: {exc}"
+                transcript.append({
+                    "step": step,
+                    "action": action,
+                    "execution_status": "candidate_gpu_handoff_failed",
+                    "handoff_error": handoff_error,
+                })
+                messages.append({"role": "user", "content": (
+                    "Candidate generation stopped because the controller GPU "
+                    f"handoff failed: {handoff_error}. Continue without an "
+                    "internal candidate."
+                )})
+                continue
+
+            generation = generate_candidate(
+                path=action["path"],
+                task_context=action.get("task_context", ""),
+                workspace=settings.workspace,
+                settings=settings,
+            )
+
+            if generation.get("error"):
+                transcript.append({
+                    "step": step,
+                    "action": action,
+                    "execution_status": "candidate_generation_failed",
+                    "generation_error": generation["error"],
+                })
+                messages.append({"role": "user", "content": (
+                    f"generate_candidate failed: {generation['error']}. "
+                    "Retry at most once, then continue without an internal candidate."
+                )})
+                continue
+
+            pre_selected_candidate = generation
+            pre_candidate_dispatched = False
+            transcript.append({
+                "step": step,
+                "action": action,
+                "execution_status": "candidate_generated",
+                "gpu_handoff": gpu_handoff,
+                "candidate_source": "internal",
+                "candidate_path": generation["path"],
+                "candidate_sha256": hashlib.sha256(
+                    generation["content"].encode("utf-8")
+                ).hexdigest(),
+                "generator_model_id": generation.get("model_id"),
+                "generator_adapter_id": generation.get("adapter_id"),
+            })
+            messages.append({"role": "user", "content": (
+                f"Internal candidate loaded for {generation['path']}. "
+                "A subsequent done or write_file will be replaced with it."
+            )})
+            continue
         _pre_candidate_was_active = (
             pre_selected_candidate is not None and not pre_candidate_dispatched
         )
@@ -1013,6 +1490,78 @@ def _run_task_with_resources(
                 settings.workspace,
                 action["path"],
             )
+
+            # Registered trusted providers evaluate the proposed source before
+            # any causal review or write dispatch. CFD-001 keeps its dedicated
+            # tokenizer/parser acceptance path below.
+            if (
+                benchmark_task_id != "cross_file_dependency_001"
+                and isinstance(benchmark_task_id, str)
+                and benchmark_task_id in ACCEPTANCE_PROVIDERS
+                and target_key is not None
+                and target_key in initial_workspace_files
+                and action["path"].lower().endswith(".py")
+            ):
+                try:
+                    candidate_sources = _snapshot_workspace_python_sources(
+                        settings.workspace
+                    )
+                    candidate_sources[target_key] = action["content"]
+                    registered_prewrite_result = execute_acceptance_suite(
+                        benchmark_task_id,
+                        candidate_sources,
+                    )
+                    if registered_prewrite_result.get("status") not in {
+                        "passed", "failed"
+                    }:
+                        raise RuntimeError(
+                            "Trusted acceptance provider returned an invalid status."
+                        )
+                except Exception as exc:  # noqa: BLE001 - fail closed
+                    registered_prewrite_result = {
+                        "task_id": benchmark_task_id,
+                        "status": "unavailable",
+                        "reason": f"{type(exc).__name__}: {exc}",
+                        "case_count": 0,
+                        "cases_passed": 0,
+                        "cases_failed": 0,
+                        "cases": [],
+                    }
+
+                transcript[-1]["registered_acceptance_prewrite"] = (
+                    registered_prewrite_result
+                )
+
+                if registered_prewrite_result["status"] != "passed":
+                    consecutive_registered_acceptance_failures += 1
+                    transcript[-1]["execution_status"] = (
+                        "blocked_by_registered_acceptance_prewrite"
+                    )
+                    transcript[-1][
+                        "consecutive_registered_acceptance_failures"
+                    ] = consecutive_registered_acceptance_failures
+
+                    messages.append({"role": "assistant", "content": raw})
+                    messages.append({
+                        "role": "user",
+                        "content": _format_registered_acceptance_feedback(
+                            registered_prewrite_result
+                        ),
+                    })
+
+                    if (
+                        consecutive_registered_acceptance_failures
+                        >= MAX_PRE_GATE_ITERATIONS
+                    ):
+                        pre_gate_blocked = True
+                        transcript[-1]["execution_status"] = (
+                            "blocked_by_registered_acceptance_prewrite_limit"
+                        )
+                        break
+
+                    continue
+
+                consecutive_registered_acceptance_failures = 0
 
             if (
                 benchmark_task_id == "cross_file_dependency_001"
@@ -1162,7 +1711,7 @@ def _run_task_with_resources(
                     and hypothesis_test.get("failure_kind") == "probe_contract"
                 ):
                     reason = hypothesis_test.get("reason") or (
-                        "Probe input did not satisfy the CFD-001 record grammar."
+                        "Probe input did not satisfy the behavioral-probe call contract."
                     )
                     transcript[-1]["execution_status"] = (
                         "blocked_by_probe_contract"
@@ -1181,21 +1730,8 @@ def _run_task_with_resources(
                     })
                     messages.append({
                         "role": "user",
-                        "content": (
-                            "Your proposed write was NOT executed. The "
-                            "behavioral probe was rejected by deterministic "
-                            "CFD-001 input validation before sandbox execution. "
-                            "This is a probe-generation failure, NOT a "
-                            "prediction mismatch and NOT causal evidence.\n"
-                            f"Validation reason: {reason}\n"
-                            "Generate a fresh function_call probe. The user "
-                            "payload contains cfd001_probe_example with a "
-                            "validated runtime_value and its JSON encoding. "
-                            "Copy runtime_value exactly into args[0]; do not "
-                            "reconstruct or alter its backslashes. Keep it as "
-                            "one complete, non-empty key=value record. "
-                            "Reconsider the proposed repair using only valid "
-                            "behavioral evidence."
+                        "content": _format_probe_contract_retry_feedback(
+                            reason, benchmark_task_id
                         ),
                     })
 
@@ -1240,11 +1776,139 @@ def _run_task_with_resources(
                     )
                     break
 
+                # A baseline mismatch identifies behavior to repair; it does
+                # not prove that the proposed candidate actually repairs it.
+                # Replay the same probe against the proposed source before
+                # allowing the causal reviewer to approve the write.
+                if (
+                    benchmark_task_id != "cross_file_dependency_001"
+                    and hypothesis_test.get("verdict") == "PREDICTION_MISMATCHED"
+                ):
+                    candidate_sources = dict(observed_files)
+                    candidate_sources[target_key] = action["content"]
+                    probes_attempted += 1
+
+                    try:
+                        from nova.tools.behavioral_probe import run_behavioral_probe
+
+                        candidate_probe_result = run_behavioral_probe(
+                            candidate_sources,
+                            probe_spec,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - fail closed
+                        candidate_probe_result = {
+                            "verdict": "INCONCLUSIVE",
+                            "reason": f"{type(exc).__name__}: {exc}",
+                            "probe_completed": False,
+                            "evidence_kind": None,
+                            "causality_established": False,
+                        }
+
+                    transcript[-1]["candidate_probe_result"] = (
+                        candidate_probe_result
+                    )
+
+                    candidate_probe_completed = (
+                        candidate_probe_result.get("probe_completed") is True
+                        and candidate_probe_result.get("evidence_kind")
+                        == "sandbox_execution"
+                    )
+                    if candidate_probe_completed:
+                        probes_completed += 1
+
+                    candidate_probe_matched = (
+                        candidate_probe_completed
+                        and candidate_probe_result.get("verdict")
+                        == "PREDICTION_MATCHED"
+                    )
+
+                    # CFD-002 specifies exception classes, not exception
+                    # message text. Accept the expected type even if the
+                    # candidate's message differs from the model's wording.
+                    if (
+                        benchmark_task_id == "retry_control_flow_002"
+                        and candidate_probe_completed
+                    ):
+                        expected_exception = probe_spec.get("expected_exception")
+                        actual_exception = candidate_probe_result.get(
+                            "actual_exception"
+                        )
+                        if (
+                            isinstance(expected_exception, dict)
+                            and isinstance(actual_exception, dict)
+                        ):
+                            candidate_probe_matched = (
+                                expected_exception.get("type")
+                                == actual_exception.get("type")
+                            )
+
+                    if not candidate_probe_matched:
+                        transcript[-1]["execution_status"] = (
+                            "blocked_by_candidate_probe"
+                        )
+                        transcript[-1]["candidate_probe_error"] = (
+                            "The proposed source did not satisfy the same "
+                            "behavioral probe that exposed the baseline defect."
+                        )
+                        messages.append({"role": "assistant", "content": raw})
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "Your proposed write was NOT executed. NOVA "
+                                "replayed the baseline behavioral probe against "
+                                "your proposed source in the isolated sandbox, "
+                                "and the candidate did not satisfy the expected "
+                                "behavior. Candidate probe result: "
+                                + json.dumps(
+                                    candidate_probe_result,
+                                    ensure_ascii=False,
+                                    default=str,
+                                )
+                                + "\\nInspect the actual observed behavior and "
+                                "repair the source implementation. Do not treat "
+                                "a causal-review approval as a substitute for "
+                                "passing this candidate replay."
+                            ),
+                        })
+                        continue
+
                 causal_review_count += 1
-                review, review_error, raw_review = request_causal_review(
+                (
+                    review,
+                    review_error,
+                    raw_review,
+                    review_attempts,
+                ) = request_causal_review(
                     action,
                     hypothesis_test,
                 )
+
+                if review_attempts:
+                    journaled_attempts = []
+                    for attempt in review_attempts:
+                        response = attempt.get("raw_response")
+                        entry = {
+                            "attempt": attempt.get("attempt"),
+                            "model_status": attempt.get("model_status"),
+                            "validation_status": attempt.get(
+                                "validation_status"
+                            ),
+                        }
+                        if "validation_error" in attempt:
+                            entry["validation_error"] = attempt[
+                                "validation_error"
+                            ]
+                        if isinstance(response, str):
+                            entry["response"] = response[:8000]
+                            entry["response_length"] = len(response)
+                            entry["response_truncated"] = len(response) > 8000
+                            entry["response_sha256"] = hashlib.sha256(
+                                response.encode("utf-8")
+                            ).hexdigest()
+                        journaled_attempts.append(entry)
+                    transcript[-1]["causal_review_attempts"] = (
+                        journaled_attempts
+                    )
 
                 if isinstance(raw_review, str):
                     transcript[-1]["causal_review_response"] = raw_review[:8000]
@@ -1354,7 +2018,42 @@ def _run_task_with_resources(
                     "causality_established": False,
                 }
 
-                if last_behavioral_probe is not None:
+                if benchmark_task_id != "cross_file_dependency_001":
+                    try:
+                        current_sources = _snapshot_workspace_python_sources(
+                            settings.workspace
+                        )
+                        verification = execute_acceptance_suite(
+                            benchmark_task_id,
+                            current_sources,
+                        )
+                        verification_status = verification.get("status")
+                        if verification_status not in {"passed", "failed"}:
+                            raise RuntimeError(
+                                "Trusted acceptance provider returned an invalid status."
+                            )
+
+                        if verification_status == "failed":
+                            verification_failed = True
+                            verification_reason = (
+                                "One or more trusted acceptance cases failed."
+                            )
+                        else:
+                            postwrite_behavior_check_passed = True
+
+                    except Exception as exc:  # noqa: BLE001 - fail closed
+                        verification_status = "unavailable"
+                        verification_unavailable = True
+                        verification_reason = (
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                        verification = {
+                            "task_id": benchmark_task_id,
+                            "status": "unavailable",
+                            "reason": verification_reason,
+                        }
+
+                elif last_behavioral_probe is not None:
                     try:
                         current_sources = {
                             name: read_file(settings.workspace, name)
@@ -1461,19 +2160,41 @@ def _run_task_with_resources(
                         }
 
                 transcript[-1]["completion_verification"] = verification
-                verification_passed = (
-                    verification.get("verdict") == "PREDICTION_MATCHED"
-                    and verification.get("probe_completed") is True
-                    and verification.get("evidence_kind") == "sandbox_execution"
-                )
+                if benchmark_task_id == "cross_file_dependency_001":
+                    verification_passed = (
+                        verification.get("verdict") == "PREDICTION_MATCHED"
+                        and verification.get("probe_completed") is True
+                        and verification.get("evidence_kind") == "sandbox_execution"
+                    )
+                    verification_status = (
+                        "passed" if verification_passed else "failed"
+                    )
+                else:
+                    verification_passed = verification_status == "passed"
+
 
                 if not verification_passed:
                     done_rejections += 1
-                    reason = (
-                        "Completion rejected: post-write behavioral verification "
-                        "did not pass. "
-                        + json.dumps(verification, ensure_ascii=False, default=str)
-                    )
+                    if benchmark_task_id == "cross_file_dependency_001":
+                        reason = (
+                            "Completion rejected: post-write behavioral verification "
+                            "did not pass. "
+                            + json.dumps(
+                                verification,
+                                ensure_ascii=False,
+                                default=str,
+                            )
+                        )
+                    else:
+                        reason = (
+                            "Completion rejected: trusted acceptance verification "
+                            "did not pass. "
+                            + json.dumps(
+                                verification,
+                                ensure_ascii=False,
+                                default=str,
+                            )
+                        )
                     transcript[-1]["execution_status"] = (
                         "rejected_by_completion_gate"
                     )
@@ -1488,6 +2209,10 @@ def _run_task_with_resources(
                         error_type="CompletionGateRejected",
                         error_fingerprint=hashlib.sha256(reason_bytes).hexdigest(),
                     )
+
+                    if benchmark_task_id != "cross_file_dependency_001":
+                        completion_gate_blocked = True
+                        break
 
                     if done_rejections >= MAX_DONE_REJECTIONS:
                         completion_gate_blocked = True
@@ -1518,7 +2243,7 @@ def _run_task_with_resources(
                 completion_gate = (
                     "postwrite_task_contract"
                     if benchmark_task_id == "cross_file_dependency_001"
-                    else "postwrite_behavioral_probe"
+                    else "trusted_acceptance_provider"
                 )
                 postwrite_behavior_check_passed = True
             else:
@@ -1689,6 +2414,10 @@ def _run_task_with_resources(
         stop_reason = "dependency_target_blocked"
     elif probe_contract_blocked:
         stop_reason = "probe_contract_blocked"
+    elif verification_unavailable:
+        stop_reason = "verification_unavailable"
+    elif verification_failed:
+        stop_reason = "verification_failed"
     elif completion_gate_blocked:
         stop_reason = "done_rejected"
     elif pre_gate_blocked:
@@ -1757,6 +2486,7 @@ def _run_task_with_resources(
         "usage_complete": all_usage_complete,
         "used_json_schema": use_json_schema,
         "stop_reason": stop_reason,
+        "candidate_preflight": candidate_preflight,
         "recovered_actions": recovered_actions,
         "recovered_runs": recovered_runs,
         "planning_mode": planning_mode,
@@ -1777,6 +2507,11 @@ def _run_task_with_resources(
         "done_rejections": done_rejections,
         "completion_gate": completion_gate,
         "completion_gate_blocked": completion_gate_blocked,
+        "verification_status": verification_status,
+        "verification": verification,
+        "verification_unavailable": verification_unavailable,
+        "verification_failed": verification_failed,
+        "verification_reason": verification_reason,
         "probes_attempted": probes_attempted,
         "probes_completed": probes_completed,
         "postwrite_behavior_check_passed": postwrite_behavior_check_passed,

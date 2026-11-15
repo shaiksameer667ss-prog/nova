@@ -1,4 +1,4 @@
-import ast
+﻿import ast
 import json
 import sqlite3
 from pathlib import Path
@@ -53,6 +53,32 @@ def stub_behavioral_probe(monkeypatch):
     monkeypatch.setattr(
         "nova.tools.behavioral_probe.run_behavioral_probe",
         fake_probe,
+    )
+
+
+@pytest.fixture(autouse=True)
+def register_test_acceptance_provider(monkeypatch):
+    from nova.controller import acceptance_providers
+
+    task_id = "test_parser_repair"
+    suite = acceptance_providers.AcceptanceSuite(
+        task_id=task_id,
+        cases=(
+            acceptance_providers.AcceptanceCase(
+                "parser_repair_contract",
+                lambda _sources: None,
+            ),
+        ),
+    )
+    monkeypatch.setitem(
+        acceptance_providers.ACCEPTANCE_PROVIDERS,
+        task_id,
+        lambda: suite,
+    )
+    monkeypatch.setitem(
+        acceptance_providers.ACCEPTANCE_EXPECTED_CASE_NAMES,
+        task_id,
+        ("parser_repair_contract",),
     )
 
 
@@ -227,9 +253,16 @@ def test_approved_existing_file_write_is_dispatched_and_recorded(tmp_path):
         patch("nova.controller.loop.ModelClient", return_value=client),
         patch("nova.controller.loop._dispatch", side_effect=dispatch),
     ):
-        result = run_task("Correct the parser", settings, planning_mode=True)
+        result = run_task(
+            "Correct the parser",
+            settings,
+            benchmark_task_id="test_parser_repair",
+            planning_mode=True,
+        )
 
     assert result["agent_success"] is True
+    assert result["verification_status"] == "passed"
+    assert result["completion_gate"] == "trusted_acceptance_provider"
     assert result["causal_reviews"] == 1
     assert result["causal_review_blocked"] is False
     assert [item["action"] for item in dispatches] == ["read_file", "write_file"]
@@ -247,6 +280,76 @@ def test_approved_existing_file_write_is_dispatched_and_recorded(tmp_path):
     )
     assert write_event["causal_review"]["decision"] == "APPROVE"
     assert write_event["execution_status"] == "succeeded"
+
+
+def test_registered_acceptance_failure_stops_without_claiming_success(tmp_path, monkeypatch):
+    from nova.controller import acceptance_providers
+
+    settings = make_settings(tmp_path)
+    task_id = "test_parser_repair"
+
+    def fail_acceptance(sources):
+        # The proposed write passes pre-write acceptance. The mocked dispatcher
+        # deliberately leaves the workspace unchanged, so post-write acceptance
+        # must reject the actual workspace.
+        if not sources.get("parser.py", "").startswith("# reviewed fix"):
+            raise AssertionError("trusted contract assertion failed")
+
+    failed_suite = acceptance_providers.AcceptanceSuite(
+        task_id=task_id,
+        cases=(
+            acceptance_providers.AcceptanceCase(
+                "parser_repair_contract",
+                fail_acceptance,
+            ),
+        ),
+    )
+    monkeypatch.setitem(
+        acceptance_providers.ACCEPTANCE_PROVIDERS,
+        task_id,
+        lambda: failed_suite,
+    )
+
+    approved = review(
+        "APPROVE",
+        evidence=[{"path": "parser.py", "start_line": 1, "end_line": 1}],
+        repair_target="parser.py",
+    )
+    client = install_model([
+        plan(),
+        action("read_file", path="parser.py"),
+        action("write_file", path="parser.py", content="# reviewed fix\\n"),
+        approved,
+        action("done", summary="Attempted repair."),
+    ])
+
+    dispatches = []
+
+    def dispatch(candidate, active_settings):
+        dispatches.append(candidate)
+        if candidate["action"] == "read_file":
+            return PARSER_SOURCE
+        return "write succeeded"
+
+    with (
+        patch("nova.controller.loop.ModelClient", return_value=client),
+        patch("nova.controller.loop._dispatch", side_effect=dispatch),
+    ):
+        result = run_task(
+            "Correct the parser",
+            settings,
+            benchmark_task_id=task_id,
+            planning_mode=True,
+        )
+
+    assert result["agent_success"] is False
+    assert result["stop_reason"] == "verification_failed"
+    assert result["verification_status"] == "failed"
+    assert result["verification_failed"] is True
+    assert result["completion_gate_blocked"] is True
+    assert result["verification"]["cases_failed"] == 1
+    assert result["verification"]["cases"][0]["status"] == "failed"
+    assert [item["action"] for item in dispatches] == ["read_file", "write_file"]
 
 
 def test_rejected_write_is_not_dispatched_and_agent_receives_guidance(tmp_path):
@@ -277,7 +380,12 @@ def test_rejected_write_is_not_dispatched_and_agent_receives_guidance(tmp_path):
         patch("nova.controller.loop.ModelClient", return_value=client),
         patch("nova.controller.loop._dispatch", side_effect=dispatch),
     ):
-        result = run_task("Correct the parser", settings, planning_mode=True)
+        result = run_task(
+            "Correct the parser",
+            settings,
+            benchmark_task_id="test_parser_repair",
+            planning_mode=True,
+        )
 
     assert result["causal_reviews"] == 1
     assert [item["action"] for item in dispatches] == ["read_file", "read_file"]
@@ -326,7 +434,12 @@ def test_investigate_prompts_dependency_read_before_repair(tmp_path):
         patch("nova.controller.loop.ModelClient", return_value=client),
         patch("nova.controller.loop._dispatch", side_effect=dispatch),
     ):
-        result = run_task("Correct the parser", settings, planning_mode=True)
+        result = run_task(
+            "Correct the parser",
+            settings,
+            benchmark_task_id="test_parser_repair",
+            planning_mode=True,
+        )
 
     assert result["causal_reviews"] == 2
     assert result["causal_review_blocked"] is False
@@ -339,13 +452,14 @@ def test_investigate_prompts_dependency_read_before_repair(tmp_path):
     ]
 
 
-def test_invalid_causal_review_blocks_existing_file_write(tmp_path):
+def test_invalid_causal_review_retries_once_then_blocks_write(tmp_path):
     settings = make_settings(tmp_path)
     client = install_model([
         plan(),
         action("read_file", path="parser.py"),
         action("write_file", path="parser.py", content="# unreviewed\n"),
         "not valid review JSON",
+        "still not valid review JSON",
     ])
     dispatches = []
 
@@ -357,7 +471,12 @@ def test_invalid_causal_review_blocks_existing_file_write(tmp_path):
         patch("nova.controller.loop.ModelClient", return_value=client),
         patch("nova.controller.loop._dispatch", side_effect=dispatch),
     ):
-        result = run_task("Correct the parser", settings, planning_mode=True)
+        result = run_task(
+            "Correct the parser",
+            settings,
+            benchmark_task_id="test_parser_repair",
+            planning_mode=True,
+        )
 
     assert result["agent_success"] is False
     assert result["stop_reason"] == "causal_review_blocked"
@@ -370,6 +489,73 @@ def test_invalid_causal_review_blocks_existing_file_write(tmp_path):
     )
     assert write_event["execution_status"] == "blocked_by_causal_review"
     assert "invalid_causal_review" in write_event["causal_review_error"]
+
+    attempts = write_event["causal_review_attempts"]
+    assert len(attempts) == 2
+    assert [item["validation_status"] for item in attempts] == [
+        "failed",
+        "failed",
+    ]
+    assert attempts[0]["response"] == "not valid review JSON"
+    assert attempts[1]["response"] == "still not valid review JSON"
+    assert attempts[0]["validation_error"]
+    assert attempts[1]["validation_error"]
+
+
+def test_invalid_causal_review_retry_accepts_corrected_review(tmp_path):
+    settings = make_settings(tmp_path)
+    approved = review(
+        "APPROVE",
+        evidence=[{"path": "parser.py", "start_line": 1, "end_line": 1}],
+        repair_target="parser.py",
+    )
+    client = install_model([
+        plan(),
+        action("read_file", path="parser.py"),
+        action("write_file", path="parser.py", content="# reviewed fix\\n"),
+        "not valid review JSON",
+        approved,
+        action("done", summary="Completed after corrected review."),
+    ])
+    dispatches = []
+
+    def dispatch(candidate, active_settings):
+        dispatches.append(candidate)
+        if candidate["action"] == "read_file":
+            return PARSER_SOURCE
+        return "write succeeded"
+
+    with (
+        patch("nova.controller.loop.ModelClient", return_value=client),
+        patch("nova.controller.loop._dispatch", side_effect=dispatch),
+    ):
+        result = run_task(
+            "Correct the parser",
+            settings,
+            benchmark_task_id="test_parser_repair",
+            planning_mode=True,
+        )
+
+    assert result["agent_success"] is True
+    assert result["causal_review_blocked"] is False
+    assert [item["action"] for item in dispatches] == [
+        "read_file",
+        "write_file",
+    ]
+
+    write_event = next(
+        item for item in read_episode(settings)
+        if item.get("action", {}).get("action") == "write_file"
+    )
+    attempts = write_event["causal_review_attempts"]
+    assert len(attempts) == 2
+    assert [item["validation_status"] for item in attempts] == [
+        "failed",
+        "passed",
+    ]
+    assert attempts[0]["response"] == "not valid review JSON"
+    assert attempts[1]["response"] == approved
+    assert write_event["causal_review"]["decision"] == "APPROVE"
 
 
 def test_new_file_creation_does_not_trigger_causal_review(tmp_path):
@@ -434,8 +620,10 @@ def test_scaffolding_only_repair_cannot_complete(tmp_path):
         )
 
     assert result["agent_success"] is False
-    assert result["stop_reason"] == "done_rejected"
-    assert result["done_rejections"] == 2
+    assert result["stop_reason"] == "verification_unavailable"
+    assert result["verification_status"] == "unavailable"
+    assert result["verification_unavailable"] is True
+    assert result["done_rejections"] == 1
     assert result["completion_gate_blocked"] is True
     assert result["new_files"] == ["probe.py"]
     assert result["changed_source_files"] == []
@@ -1154,3 +1342,451 @@ def test_two_consecutive_probe_contract_rejections_stop_without_causal_review(
         for item in rejected_writes
     )
 
+
+def test_registered_acceptance_prewrite_blocks_failed_candidate_before_probe_or_dispatch(
+    tmp_path,
+):
+    settings = make_settings(tmp_path)
+    settings.max_steps = 2
+
+    retrying_source = """def call_with_retry(operation, *, max_attempts=3):
+    if isinstance(max_attempts, bool):
+        raise TypeError("max_attempts must be an int, not bool")
+    if not isinstance(max_attempts, int) or max_attempts <= 0:
+        raise ValueError("max_attempts must be a positive integer")
+    return operation()
+"""
+    (settings.workspace / "retrying.py").write_text(
+        retrying_source, encoding="utf-8"
+    )
+
+    # The model's narrow hypothesis concerns bool, which this candidate handles.
+    # The trusted suite still rejects its string and float handling.
+    probe = {
+        "kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "symbol": "",
+        "expected_present": False,
+        "args": [{
+            "$nova_probe": "callable",
+            "behavior": "return",
+            "value": 1,
+        }],
+        "kwargs": {"max_attempts": True},
+        "expected_result": None,
+        "expected_exception": {
+            "type": "TypeError",
+            "message": "max_attempts must be an int",
+        },
+    }
+    hypothesis = {
+        "hypothesis": "Boolean attempt counts must be rejected.",
+        "prediction": "A boolean max_attempts value raises TypeError.",
+        "probe": probe,
+    }
+    client = install_model(
+        [
+            plan(),
+            action("read_file", path="retrying.py"),
+            action(
+                "write_file",
+                path="retrying.py",
+                content=retrying_source,
+            ),
+        ],
+        hypothesis_response=[hypothesis],
+    )
+
+    acceptance_failure = {
+        "task_id": "retry_control_flow_002",
+        "status": "failed",
+        "case_count": 11,
+        "cases_passed": 9,
+        "cases_failed": 2,
+        "cases": [
+            {
+                "name": "string_attempts_must_raise_type_error",
+                "status": "failed",
+                "reason": "Observed ValueError instead of TypeError.",
+            },
+            {
+                "name": "float_attempts_must_raise_type_error",
+                "status": "failed",
+                "reason": "Observed ValueError instead of TypeError.",
+            },
+        ],
+    }
+    matching_probe_result = {
+        "verdict": "PREDICTION_MATCHED",
+        "probe_kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "prediction_matched": True,
+        "probe_completed": True,
+        "evidence_kind": "sandbox_execution",
+        "causality_established": False,
+    }
+
+    dispatches = []
+
+    def dispatch(candidate, _active_settings):
+        dispatches.append(candidate)
+        if candidate["action"] == "read_file":
+            return retrying_source
+        raise AssertionError("A candidate rejected by trusted pre-write acceptance was dispatched.")
+
+    with (
+        patch("nova.controller.loop.ModelClient", return_value=client),
+        patch("nova.controller.loop._dispatch", side_effect=dispatch),
+        patch(
+            "nova.controller.loop.execute_acceptance_suite",
+            return_value=acceptance_failure,
+        ) as acceptance_runner,
+        patch(
+            "nova.tools.behavioral_probe.run_behavioral_probe",
+            return_value=matching_probe_result,
+        ) as probe_runner,
+        patch(
+            "nova.controller.loop.build_prewrite_review_messages",
+            side_effect=AssertionError(
+                "A candidate rejected by trusted acceptance must not reach causal review."
+            ),
+        ) as review_builder,
+    ):
+        result = run_task(
+            "Fix retry control flow for invalid max_attempts values.",
+            settings,
+            benchmark_task_id="retry_control_flow_002",
+            planning_mode=True,
+        )
+
+    assert result["agent_success"] is False
+    assert result["causal_reviews"] == 0
+    assert result["probes_attempted"] == 0
+    assert result["changed_source_files"] == []
+    assert [item["action"] for item in dispatches] == ["read_file"]
+
+    acceptance_runner.assert_called_once()
+    proposed_sources = acceptance_runner.call_args.args[1]
+    assert proposed_sources["retrying.py"] == retrying_source
+    probe_runner.assert_not_called()
+    review_builder.assert_not_called()
+
+    write_event = next(
+        item for item in read_episode(settings)
+        if item.get("action", {}).get("action") == "write_file"
+    )
+    assert write_event["execution_status"] == (
+        "blocked_by_registered_acceptance_prewrite"
+    )
+    assert write_event["registered_acceptance_prewrite"]["cases_failed"] == 2
+
+
+def test_cfd002_candidate_probe_mismatch_blocks_write_before_review(tmp_path):
+    settings = make_settings(tmp_path)
+    settings.max_steps = 2
+
+    retrying_source = """def call_with_retry(operation, *, max_attempts=3):
+    if isinstance(max_attempts, bool):
+        raise TypeError("max_attempts must be an int, not bool")
+    if not isinstance(max_attempts, int) or max_attempts <= 0:
+        raise ValueError("max_attempts must be a positive integer")
+    return operation()
+"""
+    (settings.workspace / "retrying.py").write_text(
+        retrying_source, encoding="utf-8"
+    )
+
+    probe = {
+        "kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "symbol": "",
+        "expected_present": False,
+        "args": [{
+            "$nova_probe": "callable",
+            "behavior": "return",
+            "value": 1,
+        }],
+        "kwargs": {"max_attempts": "3"},
+        "expected_result": None,
+        "expected_exception": {
+            "type": "TypeError",
+            "message": "max_attempts must be an int",
+        },
+    }
+    hypothesis = {
+        "hypothesis": (
+            "Non-integer max_attempts values are incorrectly classified."
+        ),
+        "prediction": (
+            "Passing a string for max_attempts raises TypeError."
+        ),
+        "probe": probe,
+    }
+
+    candidate_source = retrying_source
+    client = install_model(
+        [
+            plan(),
+            action("read_file", path="retrying.py"),
+            action(
+                "write_file",
+                path="retrying.py",
+                content=candidate_source,
+            ),
+        ],
+        hypothesis_response=[hypothesis],
+    )
+
+    baseline_result = {
+        "verdict": "PREDICTION_MISMATCHED",
+        "probe_kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "expected_result": None,
+        "expected_exception": probe["expected_exception"],
+        "actual_exception": {
+            "type": "ValueError",
+            "message": "max_attempts must be a positive integer",
+        },
+        "prediction_matched": False,
+        "probe_completed": True,
+        "evidence_kind": "sandbox_execution",
+        "causality_established": False,
+    }
+    candidate_result = dict(baseline_result)
+
+    dispatches = []
+
+    def dispatch(candidate, _active_settings):
+        dispatches.append(candidate)
+        if candidate["action"] == "read_file":
+            return retrying_source
+        raise AssertionError(
+            "A candidate that fails its replay probe must not be dispatched."
+        )
+
+    with (
+        patch("nova.controller.loop.ModelClient", return_value=client),
+        patch("nova.controller.loop._dispatch", side_effect=dispatch),
+        patch(
+            "nova.tools.behavioral_probe.run_behavioral_probe",
+            side_effect=[baseline_result, candidate_result],
+        ) as probe_runner,
+        patch(
+            "nova.controller.loop.execute_acceptance_suite",
+            return_value={
+                "task_id": "retry_control_flow_002",
+                "status": "passed",
+                "case_count": 11,
+                "cases_passed": 11,
+                "cases_failed": 0,
+                "cases": [],
+            },
+        ),
+        patch(
+            "nova.controller.loop.build_prewrite_review_messages",
+            side_effect=AssertionError(
+                "A mismatching candidate must not reach causal review."
+            ),
+        ) as review_builder,
+    ):
+        result = run_task(
+            "Fix retry control flow for invalid max_attempts values.",
+            settings,
+            benchmark_task_id="retry_control_flow_002",
+            planning_mode=True,
+        )
+
+    assert result["agent_success"] is False
+    assert result["causal_reviews"] == 0
+    assert result["probes_attempted"] == 2
+    assert result["probes_completed"] == 2
+    assert result["changed_source_files"] == []
+    assert [item["action"] for item in dispatches] == ["read_file"]
+    assert probe_runner.call_count == 2
+    review_builder.assert_not_called()
+
+    write_event = next(
+        item for item in read_episode(settings)
+        if item.get("action", {}).get("action") == "write_file"
+    )
+    assert write_event["execution_status"] == "blocked_by_candidate_probe"
+    assert write_event["candidate_probe_result"]["verdict"] == (
+        "PREDICTION_MISMATCHED"
+    )
+
+
+
+def test_cfd002_matching_candidate_replay_allows_causal_review(tmp_path):
+    settings = make_settings(tmp_path)
+
+    original_source = (
+        "def call_with_retry(operation, *, max_attempts=3):\n"
+        "    if isinstance(max_attempts, bool):\n"
+        "        raise TypeError('max_attempts must be an int, not bool')\n"
+        "    if not isinstance(max_attempts, int) or max_attempts <= 0:\n"
+        "        raise ValueError('max_attempts must be a positive integer')\n"
+        "    return operation()\n"
+    )
+    candidate_source = (
+        "def call_with_retry(operation, *, max_attempts=3):\n"
+        "    if isinstance(max_attempts, bool):\n"
+        "        raise TypeError('max_attempts must be an int, not bool')\n"
+        "    if not isinstance(max_attempts, int):\n"
+        "        raise TypeError('max_attempts must be an integer')\n"
+        "    if max_attempts <= 0:\n"
+        "        raise ValueError('max_attempts must be positive')\n"
+        "    return operation()\n"
+    )
+    (settings.workspace / "retrying.py").write_text(
+        original_source, encoding="utf-8"
+    )
+
+    expected_exception = {
+        "type": "TypeError",
+        "message": "max_attempts must be an int",
+    }
+    probe = {
+        "kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "symbol": "",
+        "expected_present": False,
+        "args": [{
+            "$nova_probe": "callable",
+            "behavior": "return",
+            "value": 1,
+        }],
+        "kwargs": {"max_attempts": "3"},
+        "expected_result": None,
+        "expected_exception": expected_exception,
+    }
+    hypothesis = {
+        "hypothesis": (
+            "Non-integer max_attempts values are incorrectly classified."
+        ),
+        "prediction": "A string max_attempts value raises TypeError.",
+        "probe": probe,
+    }
+
+    approved = review(
+        "APPROVE",
+        evidence=[{
+            "path": "retrying.py",
+            "start_line": 1,
+            "end_line": 5,
+        }],
+        repair_target="retrying.py",
+    )
+    client = install_model(
+        [
+            plan(),
+            action("read_file", path="retrying.py"),
+            action(
+                "write_file",
+                path="retrying.py",
+                content=candidate_source,
+            ),
+            approved,
+            action("done", summary="Retry validation repaired."),
+        ],
+        hypothesis_response=[hypothesis],
+    )
+
+    dispatches = []
+
+    def dispatch(candidate, active_settings):
+        dispatches.append(candidate)
+        if candidate["action"] == "read_file":
+            return original_source
+        if candidate["action"] == "write_file":
+            (active_settings.workspace / candidate["path"]).write_text(
+                candidate["content"], encoding="utf-8"
+            )
+            return "write succeeded"
+        raise AssertionError(f"Unexpected action: {candidate['action']}")
+
+    baseline_result = {
+        "verdict": "PREDICTION_MISMATCHED",
+        "probe_kind": "function_call",
+        "path": "retrying.py",
+        "function": "call_with_retry",
+        "expected_result": None,
+        "expected_exception": expected_exception,
+        "actual_exception": {
+            "type": "ValueError",
+            "message": "max_attempts must be a positive integer",
+        },
+        "prediction_matched": False,
+        "probe_completed": True,
+        "evidence_kind": "sandbox_execution",
+        "causality_established": False,
+    }
+    candidate_result = {
+        **baseline_result,
+        # The expected exception class is correct, although its message
+        # differs from the model's predicted wording.
+        "actual_exception": {
+            "type": "TypeError",
+            "message": "max_attempts must be an integer",
+        },
+    }
+
+    with (
+        patch("nova.controller.loop.ModelClient", return_value=client),
+        patch("nova.controller.loop._dispatch", side_effect=dispatch),
+        patch(
+            "nova.tools.behavioral_probe.run_behavioral_probe",
+            side_effect=[baseline_result, candidate_result],
+        ) as probe_runner,
+        patch(
+            "nova.controller.loop.execute_acceptance_suite",
+            return_value={
+                "task_id": "retry_control_flow_002",
+                "status": "passed",
+                "cases_passed": 11,
+                "cases_failed": 0,
+                "cases": [],
+            },
+        ),
+        patch(
+            "nova.controller.loop.build_prewrite_review_messages",
+            wraps=__import__(
+                "nova.controller.loop", fromlist=["build_prewrite_review_messages"]
+            ).build_prewrite_review_messages,
+        ) as review_builder,
+    ):
+        result = run_task(
+            "Fix retry control flow for invalid max_attempts values.",
+            settings,
+            benchmark_task_id="retry_control_flow_002",
+            planning_mode=True,
+        )
+
+    assert result["agent_success"] is True, result
+    assert result["verification_status"] == "passed"
+    assert result["causal_reviews"] == 1
+    assert result["probes_attempted"] == 2
+    assert result["probes_completed"] == 2
+    assert result["changed_source_files"] == ["retrying.py"]
+    assert [item["action"] for item in dispatches] == [
+        "read_file", "write_file"
+    ]
+    assert probe_runner.call_count == 2
+    assert review_builder.call_count == 1
+
+    candidate_files, replayed_probe = probe_runner.call_args_list[1].args
+    assert candidate_files["retrying.py"] == candidate_source
+    assert replayed_probe == {key: value for key, value in probe.items() if key not in {"symbol", "expected_present"}}
+
+    write_event = next(
+        item for item in read_episode(settings)
+        if item.get("action", {}).get("action") == "write_file"
+    )
+    assert write_event["execution_status"] == "succeeded"
+    assert write_event["candidate_probe_result"]["actual_exception"]["type"] == (
+        "TypeError"
+    )

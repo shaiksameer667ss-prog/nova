@@ -45,9 +45,9 @@ def _fake_usage():
 # Schema constants
 # =========================================================================
 
-def test_schema_allows_four_actions():
+def test_schema_allows_generate_candidate_action():
     assert NOVA_ACTION_SCHEMA["properties"]["action"]["enum"] == [
-        "write_file", "read_file", "list_files", "done"
+        "write_file", "read_file", "list_files", "done", "generate_candidate"
     ]
     assert NOVA_ACTION_SCHEMA["required"] == ["action"]
     assert NOVA_ACTION_SCHEMA["additionalProperties"] is False
@@ -517,3 +517,30 @@ def test_invalid_plan_and_invalid_correction_stop_without_execution(tmp_path):
     assert all(item["response"] == raw for item in result["planning_attempts"])
     assert "invalid_plan_response_after_correction" in result["planning_error"]
 
+
+
+def test_probe_contract_feedback_uses_generic_signature_guidance():
+    from nova.controller.loop import _format_probe_contract_retry_feedback
+
+    message = _format_probe_contract_retry_feedback(
+        "too many positional arguments",
+        None,
+    )
+
+    assert "keyword-only" in message
+    assert "kwargs" in message
+    assert "NOT a prediction mismatch" in message
+    assert "cfd001_probe_example" not in message
+
+
+def test_probe_contract_feedback_preserves_cfd001_guidance():
+    from nova.controller.loop import _format_probe_contract_retry_feedback
+
+    message = _format_probe_contract_retry_feedback(
+        "invalid record",
+        "cross_file_dependency_001",
+    )
+
+    assert "cfd001_probe_example" in message
+    assert "runtime_value" in message
+    assert "keyword-only" not in message
